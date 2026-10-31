@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #d97757;
+  --color-brand-dark: #c15f3c;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+html, body, #root { height: 100%; }
+body { @apply bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100 antialiased; }
