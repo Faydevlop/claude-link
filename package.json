@@ -1,0 +1,24 @@
+{
+  "name": "claude-link-monorepo",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "hub": "node packages/cli/src/index.ts hub",
+    "dev:web": "npm run dev -w @claude-link/web",
+    "build": "npm run build -w @claude-link/web",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/ws": "^8.18.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

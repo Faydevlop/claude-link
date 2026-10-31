@@ -1,0 +1,2 @@
+{ "name": "@claude-link/hub", "version": "0.1.0", "private": true, "type": "module",
+  "dependencies": { "fastify": "^5.12.7", "@fastify/websocket": "^11.3.4", "@fastify/static": "^10.1.8", "zod": "^4.6.7" } }
