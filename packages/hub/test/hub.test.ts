@@ -215,4 +215,22 @@ describe('desktop support', () => {
     expect(offline.lastDisconnectedAt).toBeTruthy();
     await hub.app.close();
   });
+
+  it('shuts down cleanly while agents are still connected', async () => {
+    const a = await addMember('Ana');
+    await hub.app.listen({ port: 0, host: '127.0.0.1' });
+    const port = (hub.app.server.address() as { port: number }).port;
+    const { default: WebSocket } = await import('ws');
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?client=agent&token=${a.token}`);
+    await new Promise(r => ws.once('message', r));
+    const errors: unknown[] = [];
+    const onError = (e: unknown) => errors.push(e);
+    process.on('uncaughtException', onError);
+    // Same order as the desktop app: stop the server, then close the database.
+    await hub.app.close();
+    hub.db.sql.close();
+    await new Promise(r => setTimeout(r, 100));
+    process.off('uncaughtException', onError);
+    expect(errors).toEqual([]);
+  });
 });

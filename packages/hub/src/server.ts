@@ -60,6 +60,9 @@ export function buildHub(opts: HubOptions) {
   const db = new Db(opts.dbPath);
   const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 2 * 1024 * 1024 });
   const conns = new Set<Conn>();
+  // Sockets keep closing after the server shuts down; by then the database may be closed too.
+  let closing = false;
+  app.addHook('preClose', async () => { closing = true; });
 
   if (!db.teamChannel()) db.createThread('channel', 'team', null, []);
 
@@ -169,6 +172,7 @@ export function buildHub(opts: HubOptions) {
       send(conn, { type: 'hello', me: db.member(conn.memberId)! });
       ws.on('close', () => {
         conns.delete(conn);
+        if (closing) return;
         if (kind === 'agent' && ![...conns].some(c => c.kind === 'agent' && c.memberId === conn.memberId)) {
           db.online.delete(conn.memberId);
           db.setDisconnected(conn.memberId);
