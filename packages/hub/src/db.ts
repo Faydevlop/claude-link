@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import type {
-  AuditEntry, GitState, Member, Message, Role, StatusUpdate, Task, TaskMode, TaskStatus, Thread, ThreadKind, AuthorKind, WorkState,
+  AuditEntry, GitState, JoinRequest, JoinRequestStatus, Presence, Member, Message, Role, StatusUpdate, Task, TaskMode, TaskStatus, Thread, ThreadKind, AuthorKind, WorkState,
 } from '../../shared/src/index.ts';
 
 const MIGRATIONS = [
@@ -73,6 +73,22 @@ const MIGRATIONS = [
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
   );
   `,
+  `
+  ALTER TABLE members ADD COLUMN last_disconnected_at TEXT;
+  CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  CREATE TABLE join_requests (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL,
+    device TEXT NOT NULL,
+    os TEXT NOT NULL,
+    ip TEXT NOT NULL,
+    secret_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    member_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  `,
 ];
 
 type Row = Record<string, any>;
@@ -83,6 +99,7 @@ export class Db {
   sql: DatabaseSync;
   // Presence is in-memory: a member is online while their agent socket is open.
   online = new Set<number>();
+  presence = new Map<number, Presence>();
 
   constructor(path: string) {
     this.sql = new DatabaseSync(path);
@@ -103,7 +120,14 @@ export class Db {
       id: r.id, name: r.name, role: r.role, isLead: !!r.is_lead,
       online: this.online.has(r.id), lastSeen: r.last_seen, repoPath: r.repo_path,
       git: parse(r.git_json) as GitState | null,
+      presence: this.online.has(r.id) ? this.presence.get(r.id) ?? null : null,
+      lastDisconnectedAt: r.last_disconnected_at ?? null,
     };
+  }
+
+  setDisconnected(id: number) {
+    this.presence.delete(id);
+    this.sql.prepare(`UPDATE members SET last_disconnected_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`).run(id);
   }
 
   createMember(name: string, role: Role, isLead: boolean, tokenHash: string): Member {
@@ -327,6 +351,44 @@ export class Db {
   runnableTasks(memberId: number): Task[] {
     return (this.sql.prepare(`SELECT * FROM tasks WHERE to_id = ? AND status = 'queued' ORDER BY id`).all(memberId) as Row[])
       .map(r => this.toTask(r));
+  }
+
+  // ---- settings ----
+
+  setting(key: string): string | null {
+    return (this.sql.prepare('SELECT value FROM settings WHERE key = ?').get(key) as Row | undefined)?.value ?? null;
+  }
+
+  setSetting(key: string, value: string) {
+    this.sql.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+  }
+
+  // ---- join requests ----
+
+  private toJoinRequest(r: Row): JoinRequest {
+    return {
+      id: r.id, name: r.name, role: r.role, device: r.device, os: r.os, ip: r.ip,
+      status: r.status as JoinRequestStatus, memberId: r.member_id, createdAt: r.created_at,
+    };
+  }
+
+  createJoinRequest(j: { name: string; role: Role; device: string; os: string; ip: string; secretHash: string }): JoinRequest {
+    return this.toJoinRequest(this.sql.prepare(`INSERT INTO join_requests (name, role, device, os, ip, secret_hash)
+      VALUES (?, ?, ?, ?, ?, ?) RETURNING *`).get(j.name, j.role, j.device, j.os, j.ip, j.secretHash) as Row);
+  }
+
+  joinRequest(id: number): (JoinRequest & { secretHash: string }) | null {
+    const r = this.sql.prepare('SELECT * FROM join_requests WHERE id = ?').get(id) as Row | undefined;
+    return r ? { ...this.toJoinRequest(r), secretHash: r.secret_hash } : null;
+  }
+
+  joinRequests(): JoinRequest[] {
+    return (this.sql.prepare('SELECT * FROM join_requests ORDER BY id DESC LIMIT 100').all() as Row[]).map(r => this.toJoinRequest(r));
+  }
+
+  updateJoinRequest(id: number, status: JoinRequestStatus, memberId: number | null = null): JoinRequest {
+    return this.toJoinRequest(this.sql.prepare('UPDATE join_requests SET status = ?, member_id = COALESCE(?, member_id) WHERE id = ? RETURNING *')
+      .get(status, memberId, id) as Row);
   }
 
   // ---- audit ----

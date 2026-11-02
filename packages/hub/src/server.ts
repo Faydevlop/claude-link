@@ -3,17 +3,29 @@ import websocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { networkInterfaces } from 'node:os';
 import type { WebSocket } from 'ws';
 import { z } from 'zod';
 import { Db } from './db.ts';
 import {
-  createMemberBody, createTaskBody, gitStateBody, openDmBody, postMessageBody, statusBody, taskCompleteBody,
+  createMemberBody, createTaskBody, gitStateBody, joinRequestBody, openDmBody, postMessageBody, statusBody, taskCompleteBody,
   taskProgressBody, updateMemberBody, updateTaskBody,
-  type HubEvent, type Member, type Role, type Task, type Thread,
+  type HubEvent, type JoinRequest, type Member, type Role, type Task, type Thread,
 } from '../../shared/src/index.ts';
 
 export const newToken = () => 'cl_' + randomBytes(24).toString('base64url');
 export const hashToken = (t: string) => createHash('sha256').update(t).digest('hex');
+
+export const HUB_VERSION = '0.2.0';
+
+// The lead's own agent connects over loopback; show the LAN address teammates would use instead.
+const clientIp = (raw: string | undefined) => {
+  const ip = (raw ?? '').replace(/^::ffff:/, '');
+  if (ip === '127.0.0.1' || ip === '::1') {
+    return Object.values(networkInterfaces()).flat().find(i => i && i.family === 'IPv4' && !i.internal)?.address ?? ip;
+  }
+  return ip || 'unknown';
+};
 
 export interface HubOptions {
   dbPath: string;
@@ -108,9 +120,25 @@ export function buildHub(opts: HubOptions) {
     return reply.status(500).send({ error: 'internal error' });
   });
 
+  // The desktop app's UI is not served by the hub, so allow cross-origin calls. Auth is a bearer token, not cookies.
+  const isPublic = (req: FastifyRequest) => {
+    const path = req.url.split('?')[0]!;
+    return path === '/api/health'
+      || (req.method === 'POST' && path === '/api/join-requests')
+      || (req.method === 'GET' && /^\/api\/join-requests\/\d+$/.test(path));
+  };
+
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
+    reply.header('access-control-allow-origin', '*');
+    if (req.method === 'OPTIONS') {
+      return reply.status(204)
+        .header('access-control-allow-methods', 'GET, POST, PATCH, DELETE, OPTIONS')
+        .header('access-control-allow-headers', 'authorization, content-type, x-claude-link-client')
+        .header('access-control-max-age', '600')
+        .send();
+    }
     if (!req.url.startsWith('/api/') && !req.url.startsWith('/ws')) return;
-    if (req.url === '/api/health') return;
+    if (isPublic(req)) return;
     const header = req.headers.authorization;
     const token = header?.startsWith('Bearer ') ? header.slice(7) : (req.query as { token?: string }).token;
     const member = authenticate(token);
@@ -128,6 +156,11 @@ export function buildHub(opts: HubOptions) {
       const conn: Conn = { ws, memberId: req.member.id, kind };
       conns.add(conn);
       if (kind === 'agent') {
+        const q = req.query as { device?: string; os?: string; appVersion?: string };
+        db.presence.set(conn.memberId, {
+          ip: clientIp(req.ip), device: (q.device ?? 'unknown device').slice(0, 120), os: (q.os ?? 'unknown').slice(0, 40),
+          appVersion: (q.appVersion ?? '').slice(0, 40), connectedSince: new Date().toISOString(),
+        });
         db.online.add(conn.memberId);
         db.audit(conn.memberId, 'agent.connected', null);
         emitMember(db.member(conn.memberId)!);
@@ -138,6 +171,7 @@ export function buildHub(opts: HubOptions) {
         conns.delete(conn);
         if (kind === 'agent' && ![...conns].some(c => c.kind === 'agent' && c.memberId === conn.memberId)) {
           db.online.delete(conn.memberId);
+          db.setDisconnected(conn.memberId);
           db.audit(conn.memberId, 'agent.disconnected', null);
           const m = db.member(conn.memberId);
           if (m) emitMember(m);
@@ -150,7 +184,77 @@ export function buildHub(opts: HubOptions) {
 
   // ---- routes ----
 
-  app.get('/api/health', async () => ({ ok: true, name: 'claude-link' }));
+  app.get('/api/health', async () => ({
+    ok: true, name: 'claude-link', version: HUB_VERSION,
+    team: db.setting('team_name') ?? 'Claude Link team', lead: db.lead()?.name ?? null,
+  }));
+
+  // ---- join requests (teammate asks, lead approves) ----
+
+  const recentRequests = new Map<string, number[]>();
+  const emitJoinRequest = (request: JoinRequest) => emit({ type: 'joinRequest.updated', request }, v => v.isLead);
+
+  app.post('/api/join-requests', async req => {
+    const ip = clientIp(req.ip);
+    const now = Date.now();
+    const times = (recentRequests.get(ip) ?? []).filter(t => now - t < 10 * 60_000);
+    if (times.length >= 5) fail(429, 'too many join requests; wait a few minutes');
+    recentRequests.set(ip, [...times, now]);
+    const b = body(joinRequestBody, req);
+    if (db.members().some(m => m.name.toLowerCase() === b.name.toLowerCase())) fail(409, 'someone on the team already uses that name');
+    const secret = newToken();
+    const request = db.createJoinRequest({ ...b, role: b.role as Role, ip, secretHash: hashToken(secret) });
+    db.audit(null, 'join.requested', `join:${request.id}`, { name: b.name, ip });
+    emitJoinRequest(request);
+    return { requestId: request.id, secret };
+  });
+
+  // Polled by the requester. The token is handed out exactly once, on the first poll after approval.
+  app.get('/api/join-requests/:id', async req => {
+    const r = db.joinRequest(idParam(req));
+    const secret = (req.query as { secret?: string }).secret;
+    if (!r || !secret || hashToken(secret) !== r.secretHash) fail(404, 'no such request');
+    if (r!.status !== 'approved') return { status: r!.status };
+    const token = newToken();
+    db.setTokenHash(r!.memberId!, hashToken(token));
+    db.updateJoinRequest(r!.id, 'claimed');
+    db.audit(r!.memberId, 'join.claimed', `join:${r!.id}`);
+    return { status: 'approved', token, member: db.member(r!.memberId!) };
+  });
+
+  app.get('/api/join-requests', async req => {
+    requireLead(req);
+    return db.joinRequests();
+  });
+
+  app.post('/api/join-requests/:id/:decision', async req => {
+    requireLead(req);
+    const { decision } = req.params as { decision: string };
+    if (decision !== 'approve' && decision !== 'reject') fail(404, 'not found');
+    const r = db.joinRequest(idParam(req)) ?? fail(404, 'no such request');
+    if (r.status !== 'pending') fail(409, `request is ${r.status}`);
+    if (decision === 'reject') {
+      const updated = db.updateJoinRequest(r.id, 'rejected');
+      db.audit(req.member.id, 'join.rejected', `join:${r.id}`, { name: r.name });
+      emitJoinRequest(updated);
+      return updated;
+    }
+    if (db.members().some(m => m.name.toLowerCase() === r.name.toLowerCase())) fail(409, 'a member with that name exists');
+    // The real token is minted when the requester claims it; until then this hash matches nothing.
+    const member = db.createMember(r.name, r.role, false, hashToken(newToken()));
+    const updated = db.updateJoinRequest(r.id, 'approved', member.id);
+    db.audit(req.member.id, 'join.approved', `join:${r.id}`, { name: r.name, member: member.id });
+    emitMember(member);
+    emitJoinRequest(updated);
+    return updated;
+  });
+
+  app.patch('/api/team', async req => {
+    requireLead(req);
+    const { name } = body(z.object({ name: z.string().trim().min(1).max(80) }), req);
+    db.setSetting('team_name', name);
+    return { name };
+  });
 
   app.get('/api/me', async req => db.member(req.member.id));
 
@@ -415,7 +519,8 @@ export function buildHub(opts: HubOptions) {
 }
 
 /** Creates the lead account on first run. Returns the token only when one was just created. */
-export function ensureLead(db: Db, name: string): { lead: Member; token: string | null } {
+export function ensureLead(db: Db, name: string, teamName?: string): { lead: Member; token: string | null } {
+  if (teamName) db.setSetting('team_name', teamName);
   const existing = db.lead();
   if (existing) return { lead: existing, token: null };
   const token = newToken();

@@ -25,6 +25,14 @@ export interface GitState {
   recentCommits: { hash: string; subject: string; at: string }[];
 }
 
+export interface Presence {
+  ip: string;
+  device: string;
+  os: string;
+  appVersion: string;
+  connectedSince: string;
+}
+
 export interface Member {
   id: number;
   name: string;
@@ -34,6 +42,23 @@ export interface Member {
   lastSeen: string | null;
   repoPath: string | null;
   git: GitState | null;
+  /** Set while the member's agent is connected. */
+  presence: Presence | null;
+  lastDisconnectedAt: string | null;
+}
+
+export type JoinRequestStatus = 'pending' | 'approved' | 'rejected' | 'claimed';
+
+export interface JoinRequest {
+  id: number;
+  name: string;
+  role: Role;
+  device: string;
+  os: string;
+  ip: string;
+  status: JoinRequestStatus;
+  memberId: number | null;
+  createdAt: string;
 }
 
 export interface StatusUpdate {
@@ -100,6 +125,7 @@ export type HubEvent =
   | { type: 'thread.updated'; thread: Thread }
   | { type: 'message.created'; message: Message }
   | { type: 'task.updated'; task: Task }
+  | { type: 'joinRequest.updated'; request: JoinRequest }
   // Sent to the target agent only: execute this task now.
   | { type: 'task.run'; task: Task; requester: Pick<Member, 'id' | 'name' | 'role'>; resumeSessionId: string | null };
 
@@ -154,4 +180,11 @@ export const taskCompleteBody = z.object({
   diff: z.string().max(400000).optional(),
   branch: z.string().max(300).optional(),
   sessionId: z.string().max(200).optional(),
+});
+
+export const joinRequestBody = z.object({
+  name: z.string().trim().min(1).max(60),
+  role: z.enum(ROLES).refine(r => r !== 'lead', 'cannot request the lead role'),
+  device: z.string().trim().max(120).default('unknown device'),
+  os: z.string().trim().max(40).default('unknown'),
 });

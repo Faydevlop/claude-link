@@ -141,3 +141,78 @@ describe('tasks', () => {
     expect((await call(a.token, 'GET', '/api/inbox')).json.assignments).toHaveLength(1);
   });
 });
+
+describe('join requests', () => {
+  const request = async (name = 'Rahul', role = 'frontend') => {
+    const r = await call(null, 'POST', '/api/join-requests', { name, role, device: 'RAHUL-PC', os: 'win32' });
+    expect(r.status).toBe(200);
+    return r.json as { requestId: number; secret: string };
+  };
+
+  it('lead approves and the requester claims a working token exactly once', async () => {
+    const { requestId, secret } = await request();
+    expect((await call(null, 'GET', `/api/join-requests/${requestId}?secret=${secret}`)).json).toEqual({ status: 'pending' });
+    expect((await call(null, 'GET', `/api/join-requests/${requestId}?secret=wrong`)).status).toBe(404);
+
+    const list = (await call(leadToken, 'GET', '/api/join-requests')).json;
+    expect(list[0]).toMatchObject({ name: 'Rahul', device: 'RAHUL-PC', os: 'win32', status: 'pending' });
+    expect(list[0].secretHash).toBeUndefined();
+
+    expect((await call(leadToken, 'POST', `/api/join-requests/${requestId}/approve`)).json.status).toBe('approved');
+    const claim = (await call(null, 'GET', `/api/join-requests/${requestId}?secret=${secret}`)).json;
+    expect(claim.status).toBe('approved');
+    expect((await call(claim.token, 'GET', '/api/me')).json).toMatchObject({ name: 'Rahul', role: 'frontend', isLead: false });
+
+    // Second poll does not hand out another token.
+    expect((await call(null, 'GET', `/api/join-requests/${requestId}?secret=${secret}`)).json).toEqual({ status: 'claimed' });
+  });
+
+  it('only the lead sees and decides requests; rejected requests get no token', async () => {
+    const a = await addMember('Ana');
+    const { requestId, secret } = await request('Mallory', 'backend');
+    expect((await call(a.token, 'GET', '/api/join-requests')).status).toBe(403);
+    expect((await call(a.token, 'POST', `/api/join-requests/${requestId}/approve`)).status).toBe(403);
+    expect((await call(null, 'POST', `/api/join-requests/${requestId}/approve`)).status).toBe(401);
+    expect((await call(leadToken, 'POST', `/api/join-requests/${requestId}/reject`)).json.status).toBe('rejected');
+    expect((await call(null, 'GET', `/api/join-requests/${requestId}?secret=${secret}`)).json).toEqual({ status: 'rejected' });
+    expect((await call(leadToken, 'POST', `/api/join-requests/${requestId}/approve`)).status).toBe(409);
+  });
+
+  it('validates input and rate-limits per address', async () => {
+    expect((await call(null, 'POST', '/api/join-requests', { name: 'Boss', role: 'lead' })).status).toBe(400);
+    expect((await call(null, 'POST', '/api/join-requests', { name: 'Lead', role: 'qa' })).status).toBe(409);
+    // Invalid attempts count toward the limit too.
+    for (let i = 0; i < 3; i++) await request(`User${i}`);
+    expect((await call(null, 'POST', '/api/join-requests', { name: 'Late', role: 'qa' })).status).toBe(429);
+  });
+});
+
+describe('desktop support', () => {
+  it('answers CORS preflight and reports the team name', async () => {
+    const pre = await hub.app.inject({ method: 'OPTIONS', url: '/api/me' });
+    expect(pre.statusCode).toBe(204);
+    expect(pre.headers['access-control-allow-headers']).toContain('authorization');
+    hub.db.setSetting('team_name', 'Clinica One');
+    expect((await call(null, 'GET', '/api/health')).json).toMatchObject({ team: 'Clinica One', lead: 'Lead' });
+  });
+
+  it('tracks agent presence and disconnect time', async () => {
+    const a = await addMember('Ana');
+    await hub.app.listen({ port: 0, host: '127.0.0.1' });
+    const port = (hub.app.server.address() as { port: number }).port;
+    const { default: WebSocket } = await import('ws');
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?client=agent&token=${a.token}&device=ANA-PC&os=win32&appVersion=0.2.0`);
+    await new Promise(r => ws.once('message', r));
+    const online = (await call(leadToken, 'GET', '/api/members')).json.find((m: { name: string }) => m.name === 'Ana');
+    expect(online).toMatchObject({ online: true, presence: { device: 'ANA-PC', os: 'win32', appVersion: '0.2.0' } });
+    // Loopback connections report the machine's LAN address.
+    expect(online.presence.ip).toMatch(/^\d+\.\d+\.\d+\.\d+$/);
+    ws.close();
+    await new Promise(r => setTimeout(r, 100));
+    const offline = (await call(leadToken, 'GET', '/api/members')).json.find((m: { name: string }) => m.name === 'Ana');
+    expect(offline.online).toBe(false);
+    expect(offline.presence).toBeNull();
+    expect(offline.lastDisconnectedAt).toBeTruthy();
+    await hub.app.close();
+  });
+});
