@@ -7,7 +7,78 @@ Claude Link connects your team's Claude Code sessions over the office network. W
 - **Request a fix in someone else's repo.** Their Claude makes the change on a new git branch, but only after the owner approves it.
 - **Chat.** There is a `#team` channel and direct messages, and every Claude-to-Claude conversation is saved.
 
-The lead uses the full web dashboard (Status, Chat, Tasks, Members, Audit). Everyone else uses the chat view.
+- **Talk to your own Claude.** The app's My Claude tab runs Claude Code on your project and can reach teammates' Claudes for you.
+
+The lead's app shows Status, Chat, My Claude, Tasks, Members, Audit and Settings. Everyone else sees Chat, My Claude, Requests and Settings.
+
+```
+ Lead's computer (Claude Link app)              Teammate's computer (Claude Link app)
+   team server: chat, tasks, status   ◄─ Wi-Fi ─►  agent: answers questions, runs approved fixes
+   + its own agent and My Claude                     + My Claude
+              Each app uses that person's own Claude Code login to do the work.
+```
+
+## Desktop app (recommended)
+
+### Install
+Download the installer from the repo's **Releases** page:
+- **Mac:** `Claude-Link-<version>-mac-arm64.dmg` (Apple Silicon) or `-x64.dmg` (Intel). Open it and drag Claude Link to Applications.
+- **Windows:** `Claude-Link-Setup-<version>.exe`. Run it and follow the installer.
+
+The installers aren't code-signed yet, so the first launch shows a warning:
+- **Mac:** right-click Claude Link in Applications, choose **Open**, then **Open** again.
+- **Windows:** click **More info**, then **Run anyway**.
+
+Everyone also needs:
+- **Claude Code**, installed and logged in. Run `claude` once in a terminal to log in.
+- **Git.**
+- To be on the **same Wi-Fi** as the team lead.
+
+The app checks for Claude Code and Git during setup.
+
+### Team lead
+1. Open Claude Link and choose **Create a team**.
+2. Enter your name and the team name, then click **Create team**. When asked, allow incoming connections:
+   - Mac: macOS asks whether to accept incoming network connections. Click **Allow**.
+   - Windows: the Defender Firewall prompt appears. Tick **Private networks** and click **Allow**.
+3. Choose your project folder.
+4. Set your permissions, then click **Finish setup**.
+5. Keep the app open while the team works. Closing the window keeps it running in the menu bar (Mac) or system tray (Windows).
+6. When a teammate asks to join, you get a notification. Open **Members** and click **Approve**.
+
+### Teammates
+1. Open Claude Link and choose **Join a team**.
+2. Pick your team from the list. If it doesn't show up, type the address shown in the lead's **Settings → Team address**.
+3. Enter your name and role, then click **Send join request**.
+4. Wait for the lead to approve. The app continues by itself once they do.
+5. Choose your project folder, set your permissions, then click **Finish setup**.
+
+Alternatively, the lead can add you under **Members → Add member** and send you an address and token. Use **Join a team → I have a token**.
+
+### Using it
+- **Chat:** `#team`, direct messages, and every Claude-to-Claude conversation. Click **Ask a teammate's Claude** to send a question or a fix request.
+- **My Claude:** chat with your own Claude Code. It works on your project and can also message teammates' Claudes, for example "ask the backend Claude what `/orders` returns" or "report status: login page done".
+  - **Ask** mode is read-only.
+  - **Edit** mode can change files and run commands.
+- **Approvals:** when someone's Claude wants to change your code, you get a notification and a yellow **Approve / Reject** banner.
+- **Settings:**
+  - change your project folder;
+  - turn automatic answers to questions on or off;
+  - start the app when you log in;
+  - optionally add the team tools to your regular Claude Code in VS Code or the terminal (off by default).
+
+### Building the installers
+```bash
+npm install
+npm run app          # run the app in development
+npm run dist:mac     # build a .dmg on a Mac (Windows installers are built by CI)
+```
+Pushing a tag like `v0.2.0` runs `.github/workflows/desktop.yml`. It builds the Mac and Windows installers and attaches them to a GitHub Release.
+
+---
+
+## Command-line version
+The app is the easiest way to run Claude Link. If you prefer terminals, the same features are also available as a CLI.
 
 ```
  Lead's laptop: claude-link hub  ◄──── WebSocket + REST ────►  claude-link agent (each teammate)
@@ -95,5 +166,6 @@ Code layout:
 - `packages/hub` is the Fastify server and SQLite store.
 - `packages/cli` contains the `hub`, `join`, `agent`, `mcp` and `hook` commands.
 - `packages/web` is the React dashboard.
+- `packages/desktop` is the Electron app. It hosts the hub (lead), runs the agent and My Claude, and reuses the web UI.
 
 Set `CLAUDE_LINK_HOME` to run several identities on one machine while testing.
