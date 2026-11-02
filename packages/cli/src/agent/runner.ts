@@ -1,10 +1,10 @@
-import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { Member, Task } from '../../../shared/src/index.ts';
 import type { Config } from '../config.ts';
 import { home } from '../config.ts';
 import { git } from './git.ts';
+import { resolveClaudeBin, spawnClaude } from './claudeBin.ts';
 
 export interface RunResult {
   ok: boolean;
@@ -42,7 +42,7 @@ function runClaude(opts: {
   if (opts.resume) args.push('--resume', opts.resume);
 
   return new Promise(resolve => {
-    const child = spawn(opts.bin, args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: process.env });
+    const child = spawnClaude(opts.bin, args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: process.env });
     let buf = '';
     let stderr = '';
     let sessionId: string | undefined;
@@ -72,12 +72,12 @@ function runClaude(opts: {
       }
     };
 
-    child.stdout.on('data', d => {
+    child.stdout!.on('data', d => {
       buf += d;
       let i;
       while ((i = buf.indexOf('\n')) >= 0) { handle(buf.slice(0, i)); buf = buf.slice(i + 1); }
     });
-    child.stderr.on('data', d => { stderr = (stderr + d).slice(-4000); });
+    child.stderr!.on('data', d => { stderr = (stderr + d).slice(-4000); });
     child.on('error', e => {
       clearTimeout(timer);
       resolve({ ok: false, result: `Could not start Claude Code (${opts.bin}): ${e.message}` });
@@ -87,7 +87,7 @@ function runClaude(opts: {
       if (buf) handle(buf);
       resolve(final ?? { ok: false, result: `Claude Code exited with code ${code}. ${stderr.trim()}`.trim(), sessionId });
     });
-    child.stdin.end(opts.prompt);
+    child.stdin!.end(opts.prompt);
   });
 }
 
@@ -97,7 +97,7 @@ export async function runTask(task: Task, requester: Requester, resumeSessionId:
   if (!repo || !existsSync(repo)) {
     return { ok: false, result: `${config.name} has no repository configured for Claude Link (re-run join with --repo).` };
   }
-  const bin = config.claudeBin ?? 'claude';
+  const bin = resolveClaudeBin(config.claudeBin);
   const timeoutMs = (config.taskTimeoutMinutes ?? 15) * 60_000;
   const who = `${requester.name} (${requester.role})`;
 

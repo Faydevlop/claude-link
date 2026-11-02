@@ -1,10 +1,10 @@
-import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeApi } from '../api.ts';
 import { home, saveConfig } from '../config.ts';
+import { runClaudeSync } from '../agent/claudeBin.ts';
 import type { Member } from '../../../shared/src/index.ts';
 
 const binPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../bin/claude-link.js');
@@ -14,8 +14,8 @@ const selfCommand = () => [process.execPath, binPath];
 
 function registerMcp() {
   const env = process.env.CLAUDE_LINK_HOME ? ['-e', `CLAUDE_LINK_HOME=${home()}`] : [];
-  try { execFileSync('claude', ['mcp', 'remove', '--scope', 'user', 'claude-link'], { stdio: 'ignore' }); } catch {}
-  execFileSync('claude', ['mcp', 'add', '--scope', 'user', ...env, 'claude-link', '--', ...selfCommand(), 'mcp'], { stdio: 'inherit' });
+  try { runClaudeSync(['mcp', 'remove', '--scope', 'user', 'claude-link']); } catch { /* not registered yet */ }
+  runClaudeSync(['mcp', 'add', '--scope', 'user', ...env, 'claude-link', '--', ...selfCommand(), 'mcp']);
 }
 
 function installHooks() {
