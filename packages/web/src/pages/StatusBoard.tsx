@@ -2,6 +2,8 @@ import { timeAgo } from '../api.ts';
 import { useStore } from '../store.tsx';
 import { Badge, Card, Dot, Empty, ModeTag, ROLE_LABEL } from '../ui.tsx';
 
+export const OS: Record<string, string> = { darwin: 'macOS', win32: 'Windows', linux: 'Linux' };
+
 export default function StatusBoard() {
   const { members, statuses, tasks, memberName } = useStore();
   const active = tasks.filter(t => ['pending_approval', 'queued', 'running', 'open', 'in_progress', 'blocked'].includes(t.status));
@@ -23,6 +25,11 @@ export default function StatusBoard() {
                 <span className="font-semibold">{m.name}</span>
                 <span className="text-xs text-stone-500">{ROLE_LABEL[m.role]}</span>
                 <span className="ml-auto text-xs text-stone-400">seen {timeAgo(m.lastSeen)}</span>
+              </div>
+              <div className="-mt-1.5 text-xs text-stone-500">
+                {m.presence
+                  ? <>{m.presence.device} · {OS[m.presence.os] ?? m.presence.os} · {m.presence.ip} · connected {timeAgo(m.presence.connectedSince)}</>
+                  : <>Disconnected{m.lastDisconnectedAt ? ` ${timeAgo(m.lastDisconnectedAt)}` : ''}</>}
               </div>
               {s ? (
                 <div>

@@ -1,21 +1,52 @@
 import { useState } from 'react';
-import { api, timeAgo, type Member, type Role } from '../api.ts';
+import { api, hubUrl, timeAgo, type JoinRequest, type Member, type Role } from '../api.ts';
 import { useStore } from '../store.tsx';
 import { Button, Card, Copyable, Dot, inputCls, ROLE_LABEL } from '../ui.tsx';
+import { OS } from './StatusBoard.tsx';
+
+function JoinRequests() {
+  const { joinRequests } = useStore();
+  const [busy, setBusy] = useState<number | null>(null);
+  const pending = joinRequests.filter(r => r.status === 'pending');
+  if (!pending.length) return null;
+  const decide = async (r: JoinRequest, approve: boolean) => {
+    setBusy(r.id);
+    try { await api('POST', `/api/join-requests/${r.id}/${approve ? 'approve' : 'reject'}`); } catch (e) { alert((e as Error).message); }
+    setBusy(null);
+  };
+  return (
+    <Card className="mb-4 border-amber-300 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10">
+      <div className="mb-2 font-medium">Waiting to join ({pending.length})</div>
+      {pending.map(r => (
+        <div key={r.id} className="flex flex-wrap items-center gap-3 border-t border-amber-200 py-2.5 first:border-0 dark:border-amber-500/20">
+          <div className="min-w-0 flex-1 text-sm">
+            <div><b>{r.name}</b> · {ROLE_LABEL[r.role]}</div>
+            <div className="text-xs text-stone-500">{r.device} · {OS[r.os] ?? r.os} · {r.ip} · {timeAgo(r.createdAt)}</div>
+          </div>
+          <Button kind="primary" disabled={busy === r.id} onClick={() => decide(r, true)}>Approve</Button>
+          <Button disabled={busy === r.id} onClick={() => decide(r, false)}>Decline</Button>
+        </div>
+      ))}
+    </Card>
+  );
+}
 
 const ROLES: Role[] = ['qa', 'frontend', 'backend', 'ai', 'other'];
 
 function JoinInstructions({ name, token }: { name: string; token: string }) {
-  const hub = location.origin;
+  const hub = hubUrl('');
   return (
     <Card className="mb-4 border-emerald-300 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10">
       <div className="font-medium">Send these steps to {name}</div>
       <p className="mb-3 text-xs text-stone-600 dark:text-stone-400">The token is shown only once. It works as their password for the web chat too.</p>
       <ol className="space-y-3 text-sm">
-        <li>1. Get Claude Link (clone the repo, run <code>npm install &amp;& npm run build</code>, then <code>cd packages/cli &amp;& npm link</code>), then join:
-          <Copyable text={`claude-link join ${hub} --token ${token} --repo <path-to-your-project>`} /></li>
-        <li>2. Keep the agent running so other Claudes can reach theirs:<Copyable text="claude-link agent" /></li>
-        <li>3. Chat in the browser: <a className="text-brand underline" href={hub}>{hub}</a></li>
+        <li>1. Install the Claude Link app and open it.</li>
+        <li>2. Choose <b>Join a team</b> → <b>I have a token</b>, and enter:
+          <div className="mt-1 space-y-1">
+            <Copyable text={hub.replace(/^https?:\/\//, '')} />
+            <Copyable text={token} />
+          </div></li>
+        <li className="text-xs text-stone-500">Easier: they can pick your team from the list and send a join request instead. It shows up here for you to approve.</li>
       </ol>
     </Card>
   );
@@ -38,6 +69,7 @@ export default function Members() {
   return (
     <div className="mx-auto max-w-4xl p-4 md:p-6">
       <h1 className="mb-4 text-xl font-semibold">Members</h1>
+      <JoinRequests />
       <Card className="mb-4">
         <div className="mb-3 font-medium">Add a teammate</div>
         <div className="flex flex-wrap gap-2">
@@ -55,7 +87,10 @@ export default function Members() {
             <Dot on={m.online} />
             <div className="min-w-0 flex-1">
               <div className="font-medium">{m.name}{m.id === me.id && <span className="ml-2 text-xs text-stone-400">(you)</span>}</div>
-              <div className="truncate text-xs text-stone-500">{m.repoPath ?? 'no repo reported'} · seen {timeAgo(m.lastSeen)}</div>
+              <div className="truncate text-xs text-stone-500">
+                {m.presence ? `${m.presence.device} · ${OS[m.presence.os] ?? m.presence.os} · ${m.presence.ip}` : `offline${m.lastDisconnectedAt ? ` since ${timeAgo(m.lastDisconnectedAt)}` : ''}`}
+                {' · '}{m.repoPath ?? 'no project folder'}
+              </div>
             </div>
             {m.isLead ? <span className="text-sm text-stone-500">Team lead</span> : (
               <>

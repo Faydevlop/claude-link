@@ -254,7 +254,6 @@ export default function Chat() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <ApprovalBanner />
       <div className="flex min-h-0 flex-1">
         <aside className={cx('w-72 shrink-0 border-r border-stone-200 bg-stone-100/60 dark:border-stone-800 dark:bg-stone-900/40', 'max-md:w-full', (thread || composing) && 'max-md:hidden')}>
           <ThreadList selected={composing ? null : selected} onSelect={id => { setComposing(false); setSelected(id); }} onNewRequest={() => setComposing(true)} />

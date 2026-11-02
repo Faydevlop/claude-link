@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { api, getToken, type HubEvent, type Member, type Message, type StatusUpdate, type Task, type Thread } from './api.ts';
+import { api, getToken, hubWsUrl, type HubEvent, type JoinRequest, type Member, type Message, type StatusUpdate, type Task, type Thread } from './api.ts';
 
 interface State {
   me: Member;
@@ -8,6 +8,7 @@ interface State {
   tasks: Task[];
   statuses: StatusUpdate[];
   messages: Record<number, Message[]>;
+  joinRequests: JoinRequest[];
   connected: boolean;
 }
 
@@ -30,17 +31,18 @@ const upsert = <T extends { id: number }>(list: T[], item: T) => {
 };
 
 export function StoreProvider({ me, children }: { me: Member; children: ReactNode }) {
-  const [state, setState] = useState<State>({ me, members: [], threads: [], tasks: [], statuses: [], messages: {}, connected: false });
+  const [state, setState] = useState<State>({ me, members: [], threads: [], tasks: [], statuses: [], messages: {}, joinRequests: [], connected: false });
   const loaded = useRef(new Set<number>());
 
   const refresh = useCallback(async () => {
-    const [members, threads, tasks, status] = await Promise.all([
+    const [members, threads, tasks, status, joinRequests] = await Promise.all([
       api<Member[]>('GET', '/api/members'),
       api<Thread[]>('GET', '/api/threads'),
       api<Task[]>('GET', '/api/tasks'),
       me.isLead ? api<{ statuses: StatusUpdate[] }>('GET', '/api/status') : Promise.resolve({ statuses: [] }),
+      me.isLead ? api<JoinRequest[]>('GET', '/api/join-requests') : Promise.resolve([] as JoinRequest[]),
     ]);
-    setState(s => ({ ...s, members, threads, tasks, statuses: status.statuses }));
+    setState(s => ({ ...s, members, threads, tasks, statuses: status.statuses, joinRequests }));
   }, [me.isLead]);
 
   const loadMessages = useCallback(async (threadId: number) => {
@@ -55,8 +57,7 @@ export function StoreProvider({ me, children }: { me: Member; children: ReactNod
     let retry: ReturnType<typeof setTimeout>;
     let closed = false;
     const connect = () => {
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      ws = new WebSocket(`${proto}://${location.host}/ws?client=web&token=${encodeURIComponent(getToken() ?? '')}`);
+      ws = new WebSocket(hubWsUrl(`/ws?client=web&token=${encodeURIComponent(getToken() ?? '')}`));
       ws.onopen = () => { setState(s => ({ ...s, connected: true })); void refresh(); };
       ws.onclose = () => {
         setState(s => ({ ...s, connected: false }));
@@ -70,6 +71,7 @@ export function StoreProvider({ me, children }: { me: Member; children: ReactNod
             case 'member.removed': return { ...s, members: s.members.filter(m => m.id !== ev.memberId) };
             case 'status.updated': return { ...s, statuses: [ev.status, ...s.statuses.filter(x => x.memberId !== ev.status.memberId)] };
             case 'thread.updated': return { ...s, threads: upsert(s.threads, ev.thread) };
+            case 'joinRequest.updated': return { ...s, joinRequests: upsert(s.joinRequests, ev.request) };
             case 'task.updated': return { ...s, tasks: upsert(s.tasks, ev.task).sort((a, b) => b.id - a.id) };
             case 'message.created': {
               if (!loaded.current.has(ev.message.threadId)) return s;

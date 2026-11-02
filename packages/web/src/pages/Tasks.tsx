@@ -58,7 +58,7 @@ function Row({ t }: { t: Task }) {
 const FILTERS = { active: ['pending_approval', 'queued', 'running', 'open', 'in_progress', 'blocked'], done: ['done', 'rejected', 'failed'], all: null } as const;
 
 export default function Tasks() {
-  const { tasks } = useStore();
+  const { tasks, me } = useStore();
   const [filter, setFilter] = useState<keyof typeof FILTERS>('active');
   const [assigning, setAssigning] = useState(false);
   const allowed = FILTERS[filter] as readonly string[] | null;
@@ -66,13 +66,13 @@ export default function Tasks() {
   return (
     <div className="p-4 md:p-6">
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-semibold">Tasks</h1>
+        <h1 className="text-xl font-semibold">{me.isLead ? 'Tasks' : 'Requests'}</h1>
         <div className="flex rounded-lg bg-stone-200/70 p-0.5 text-sm dark:bg-stone-800">
           {(Object.keys(FILTERS) as (keyof typeof FILTERS)[]).map(f => (
             <button key={f} onClick={() => setFilter(f)} className={cx('rounded-md px-3 py-1 capitalize', filter === f && 'bg-white shadow-sm dark:bg-stone-950')}>{f}</button>
           ))}
         </div>
-        <Button kind="primary" className="ml-auto" onClick={() => setAssigning(true)}>+ Assign task</Button>
+        {me.isLead && <Button kind="primary" className="ml-auto" onClick={() => setAssigning(true)}>+ Assign task</Button>}
       </div>
       {assigning && <AssignForm onDone={() => setAssigning(false)} />}
       <Card className="p-0">{shown.length ? shown.map(t => <Row key={t.id} t={t} />) : <Empty>No tasks here.</Empty>}</Card>
