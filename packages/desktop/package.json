@@ -1,0 +1,25 @@
+{
+  "name": "@claude-link/desktop",
+  "productName": "Claude Link",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Connect your team's Claude Code sessions over the office network",
+  "author": "Fayis <fayfayis74@gmail.com>",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "env -u ELECTRON_RUN_AS_NODE electron-vite dev",
+    "build": "electron-vite build",
+    "start": "env -u ELECTRON_RUN_AS_NODE electron-vite preview",
+    "dist:mac": "electron-vite build && electron-builder --mac",
+    "dist:win": "electron-vite build && electron-builder --win"
+  },
+  "devDependencies": {
+    "bonjour-service": "^1.4.4",
+    "electron": "45.2.1",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "@tailwindcss/vite": "^4.3.3",
+    "tailwindcss": "^4.3.3"
+  }
+}

@@ -13,7 +13,11 @@
     "dev:web": "npm run dev -w @claude-link/web",
     "build": "npm run build -w @claude-link/web",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "app": "npm run dev -w @claude-link/desktop",
+    "app:build": "npm run build -w @claude-link/desktop",
+    "dist:mac": "npm run dist:mac -w @claude-link/desktop",
+    "dist:win": "npm run dist:win -w @claude-link/desktop"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
