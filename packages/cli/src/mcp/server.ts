@@ -78,9 +78,9 @@ export async function mcpCommand() {
       const s = statuses.find(x => x.memberId === m.id);
       const lines = [fmtMember(m)];
       lines.push(s ? `  status: ${s.state} — ${s.summary} (${s.createdAt.slice(0, 16).replace('T', ' ')})` : '  status: (none reported)');
-      if (m.git) {
-        lines.push(`  branch: ${m.git.branch}, ${m.git.dirtyFiles.length} uncommitted file(s)`);
-        for (const c of m.git.recentCommits.slice(0, 5)) lines.push(`    ${c.hash} ${c.subject}`);
+      for (const p of m.git?.projects ?? (m.git ? [{ name: '', ...m.git }] : [])) {
+        lines.push(`  ${p.name ? `${p.name}: ` : ''}branch ${p.branch}, ${p.dirtyFiles.length} uncommitted file(s)`);
+        for (const c of p.recentCommits.slice(0, p.name ? 3 : 5)) lines.push(`    ${c.hash} ${c.subject}`);
       }
       return lines.join('\n');
     }).join('\n\n');

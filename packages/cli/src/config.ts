@@ -1,13 +1,19 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import type { Project } from '../../shared/src/index.ts';
 
 export interface Config {
   hubUrl: string;
   token: string;
   memberId: number;
   name: string;
+  /** First project; kept for older configs. */
   repoPath: string | null;
+  /** All projects teammates' requests can use. */
+  projects?: Project[];
+  /** Folder that holds the projects, if they were picked from one. */
+  workspaceRoot?: string | null;
   claudeBin?: string;
   taskTimeoutMinutes?: number;
   // Extra tools allowed for approved fix tasks, e.g. "Bash(npm test:*)".

@@ -1,4 +1,4 @@
-import type { Member, Role } from './index.ts';
+import type { Member, Project, Role } from './index.ts';
 
 /** Contract between the Electron main process and the UI (exposed as `window.claudeLink`). */
 
@@ -8,7 +8,11 @@ export interface DesktopSettings {
   token: string;
   memberId: number;
   name: string;
+  /** First project; kept in sync with `projects` for older readers. */
   repoPath: string | null;
+  projects: Project[];
+  /** Folder the projects were picked from (multiple-projects mode), or null for a single project. */
+  workspaceRoot: string | null;
   teamName: string;
   port?: number;
   autoApproveReads: boolean;
@@ -75,8 +79,9 @@ export interface DesktopBridge {
   requestJoin(input: { hubUrl: string; name: string; role: Role }): Promise<{ requestId: number }>;
   pollJoin(): Promise<{ status: 'pending' | 'approved' | 'rejected' | 'claimed' | 'none'; member?: Member }>;
   joinWithToken(input: { hubUrl: string; token: string }): Promise<DesktopState>;
-  pickProjectFolder(): Promise<{ path: string; isGit: boolean } | null>;
-  updateSettings(patch: Partial<Pick<DesktopSettings, 'repoPath' | 'autoApproveReads' | 'launchAtLogin' | 'claudeCodeIntegration'>>): Promise<DesktopState>;
+  /** Opens a folder picker; `repos` lists the git repositories found at or inside the folder. */
+  pickProjectFolder(): Promise<{ path: string; isGit: boolean; repos: Project[] } | null>;
+  updateSettings(patch: Partial<Pick<DesktopSettings, 'projects' | 'workspaceRoot' | 'autoApproveReads' | 'launchAtLogin' | 'claudeCodeIntegration'>>): Promise<DesktopState>;
   finishOnboarding(): Promise<DesktopState>;
   testNotification(): Promise<void>;
   leaveTeam(): Promise<DesktopState>;

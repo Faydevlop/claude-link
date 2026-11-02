@@ -4,6 +4,7 @@ import { createInterface } from 'node:readline/promises';
 import { loadConfig } from '../config.ts';
 import type { Task } from '../../../shared/src/index.ts';
 import { Agent } from './core.ts';
+import { projectsOf } from '../projects.ts';
 
 const log = (...a: unknown[]) => console.log(`[${new Date().toLocaleTimeString()}]`, ...a);
 
@@ -20,7 +21,8 @@ export async function agentCommand() {
   agent.on('log', m => log(m));
   agent.on('ready', me => {
     log(`Claude Link agent for ${me.name} (${me.role}) → ${config.hubUrl}`);
-    log(config.repoPath ? `Repository: ${config.repoPath}` : 'No repository configured: incoming tasks will fail. Re-run join with --repo.');
+    const projects = projectsOf(config);
+    log(projects.length ? `Projects: ${projects.map(p => `${p.name} (${p.path})`).join(', ')}` : 'No project configured: incoming tasks will fail. Re-run join with --repo or --workspace.');
   });
   agent.on('connected', () => log('Connected to hub. Waiting for requests… (Ctrl+C to stop)'));
   agent.on('disconnected', () => log('Disconnected from hub; reconnecting…'));

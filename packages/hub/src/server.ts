@@ -325,7 +325,7 @@ export function buildHub(opts: HubOptions) {
 
   app.post('/api/status/git', async req => {
     const b = body(gitStateBody, req);
-    db.setGit(req.member.id, { branch: b.branch, dirtyFiles: b.dirtyFiles, recentCommits: b.recentCommits }, b.repoPath);
+    db.setGit(req.member.id, { branch: b.branch, dirtyFiles: b.dirtyFiles, recentCommits: b.recentCommits, projects: b.projects }, b.repoPath);
     emitMember(db.member(req.member.id)!);
     return { ok: true };
   });

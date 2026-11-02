@@ -19,10 +19,20 @@ export type TaskStatus = (typeof TASK_STATUSES)[number];
 export type ThreadKind = 'dm' | 'channel' | 'claude';
 export type AuthorKind = 'human' | 'claude' | 'system';
 
-export interface GitState {
+export interface Project {
+  name: string;
+  path: string;
+}
+
+export interface RepoState {
   branch: string;
   dirtyFiles: string[];
   recentCommits: { hash: string; subject: string; at: string }[];
+}
+
+/** The first project's state at the top level; every project (when there are several) under `projects`. */
+export interface GitState extends RepoState {
+  projects?: (RepoState & { name: string })[];
 }
 
 export interface Presence {
@@ -147,11 +157,16 @@ export const statusBody = z.object({
   taskId: z.number().int().optional(),
 });
 
-export const gitStateBody = z.object({
-  repoPath: z.string().max(1000).optional(),
+const repoStateShape = {
   branch: z.string().max(300),
   dirtyFiles: z.array(z.string()).max(500),
   recentCommits: z.array(z.object({ hash: z.string(), subject: z.string(), at: z.string() })).max(20),
+};
+
+export const gitStateBody = z.object({
+  repoPath: z.string().max(1000).optional(),
+  ...repoStateShape,
+  projects: z.array(z.object({ name: z.string().max(120), ...repoStateShape })).max(50).optional(),
 });
 
 export const openDmBody = z.object({ memberId: z.number().int() });

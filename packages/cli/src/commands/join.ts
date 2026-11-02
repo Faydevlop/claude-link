@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeApi } from '../api.ts';
 import { home, saveConfig } from '../config.ts';
 import { runClaudeSync } from '../agent/claudeBin.ts';
-import type { Member } from '../../../shared/src/index.ts';
+import type { Member, Project } from '../../../shared/src/index.ts';
+import { findRepos, uniqueNames } from '../projects.ts';
 
 const binPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../bin/claude-link.js');
 
@@ -35,16 +36,27 @@ function installHooks() {
   console.log(`  ✓ Added a PostToolUse hook to ${settingsPath} (reports your commits to the team lead)`);
 }
 
-export async function joinCommand(hubUrl: string, opts: { token: string; repo?: string; mcp: boolean; hooks?: boolean }) {
+export async function joinCommand(hubUrl: string, opts: { token: string; repo?: string[]; workspace?: string; mcp: boolean; hooks?: boolean }) {
   const url = new URL(hubUrl).origin;
   const me = await makeApi({ hubUrl: url, token: opts.token })<Member>('GET', '/api/me');
-  const repoPath = opts.repo ? resolve(opts.repo.replace(/^~(?=\/)/, homedir())) : null;
-  if (repoPath && !existsSync(join(repoPath, '.git'))) {
-    throw new Error(`${repoPath} is not a git repository. Pass --repo <path to your project checkout>.`);
-  }
+  const expand = (p: string) => resolve(p.replace(/^~(?=[\/])/, homedir()));
 
-  saveConfig({ hubUrl: url, token: opts.token, memberId: me.id, name: me.name, repoPath });
+  let projects: Project[] = [];
+  const workspaceRoot = opts.workspace ? expand(opts.workspace) : null;
+  if (workspaceRoot) {
+    projects = findRepos(workspaceRoot);
+    if (!projects.length) throw new Error(`No git repositories found in ${workspaceRoot}.`);
+  }
+  for (const r of opts.repo ?? []) {
+    const p = expand(r);
+    if (!existsSync(join(p, '.git'))) throw new Error(`${p} is not a git repository. Use --workspace <folder> for a folder that holds several projects.`);
+    projects.push({ name: basename(p), path: p });
+  }
+  projects = uniqueNames(projects.filter((p, i) => projects.findIndex(q => q.path === p.path) === i));
+
+  saveConfig({ hubUrl: url, token: opts.token, memberId: me.id, name: me.name, repoPath: projects[0]?.path ?? null, projects, workspaceRoot });
   console.log(`\n  ✓ Joined as ${me.name} (${me.role}) — config saved to ${home()}/config.json`);
+  for (const p of projects) console.log(`    project: ${p.name}  ${p.path}`);
 
   if (opts.mcp) {
     registerMcp();
@@ -54,6 +66,6 @@ export async function joinCommand(hubUrl: string, opts: { token: string; repo?: 
 
   console.log(`\n  Next: keep the agent running so teammates' Claudes can reach yours:`);
   console.log(`    claude-link agent`);
-  if (!repoPath) console.log(`  (No --repo given: incoming questions and fixes need one. Re-run join with --repo <path>.)`);
+  if (!projects.length) console.log(`  (No project given: incoming questions and fixes need one. Re-run join with --repo <path> or --workspace <folder>.)`);
   console.log(`  Web chat: ${url}  (log in with your token)\n`);
 }

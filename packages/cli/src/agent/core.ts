@@ -5,6 +5,7 @@ import type { Config } from '../config.ts';
 import type { HubEvent, Member, Task } from '../../../shared/src/index.ts';
 import { gitState } from './git.ts';
 import { runTask, type RunResult } from './runner.ts';
+import { projectsOf } from '../projects.ts';
 
 type RunJob = Extract<HubEvent, { type: 'task.run' }>;
 
@@ -85,9 +86,17 @@ export class Agent extends EventEmitter<AgentEvents> {
   }
 
   private async reportGit() {
-    if (!this.config.repoPath) return;
-    try { await this.api('POST', '/api/status/git', { repoPath: this.config.repoPath, ...(await gitState(this.config.repoPath)) }); }
-    catch { /* hub unreachable; retried next tick */ }
+    const projects = projectsOf(this.config);
+    if (!projects.length) return;
+    try {
+      const states = await Promise.all(projects.map(async p => ({ name: p.name, ...(await gitState(p.path)) })));
+      const { name: _, ...first } = states[0]!;
+      await this.api('POST', '/api/status/git', {
+        repoPath: projects.length > 1 ? (this.config.workspaceRoot ?? projects[0]!.path) : projects[0]!.path,
+        ...first,
+        projects: projects.length > 1 ? states : undefined,
+      });
+    } catch { /* hub unreachable; retried next tick */ }
   }
 
   private async requesterName(id: number) {
