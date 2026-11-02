@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { desktop, type DesktopState } from '../desktop.ts';
 import { Button, Card, Copyable, cx } from '../ui.tsx';
+import ProjectsPicker, { type ProjectSelection } from '../ProjectsPicker.tsx';
 
 function Row({ title, detail, children }: { title: string; detail?: ReactNode; children: ReactNode }) {
   return (
@@ -28,6 +29,9 @@ export default function Settings({ state, onState }: { state: DesktopState; onSt
   const s = state.settings!;
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const projects = s.projects ?? [];
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<ProjectSelection>({ projects, workspaceRoot: s.workspaceRoot ?? null });
 
   const update = async (patch: Parameters<typeof bridge.updateSettings>[0]) => {
     setBusy(true); setError('');
@@ -55,14 +59,19 @@ export default function Settings({ state, onState }: { state: DesktopState; onSt
             <div className="w-full sm:w-72"><Copyable text={teamAddress} /></div>
           </Row>
         )}
-        <Row title="Project folder" detail={s.repoPath ?? 'Not set. Teammates\' questions can\'t be answered until you choose one.'}>
-          <Button disabled={busy} onClick={async () => {
-            const f = await bridge.pickProjectFolder();
-            if (!f) return;
-            if (!f.isGit) { setError('That folder is not a git repository. Choose your project\'s root folder.'); return; }
-            await update({ repoPath: f.path });
-          }}>Change…</Button>
+        <Row title="Projects" detail={projects.length
+          ? <>{projects.map(p => p.name).join(', ')}{s.workspaceRoot && <span className="block font-mono text-xs">{s.workspaceRoot}</span>}</>
+          : 'None yet. Teammates\' questions can\'t be answered until you add one.'}>
+          <Button disabled={busy} onClick={() => { setDraft({ projects, workspaceRoot: s.workspaceRoot ?? null }); setEditing(e => !e); }}>{editing ? 'Cancel' : 'Change…'}</Button>
         </Row>
+        {editing && (
+          <div className="border-b border-stone-100 pb-4 dark:border-stone-800">
+            <ProjectsPicker value={draft} onChange={setDraft} />
+            <div className="mt-3 flex justify-end">
+              <Button kind="primary" disabled={busy || !draft.projects.length} onClick={async () => { await update(draft); setEditing(false); }}>Save projects</Button>
+            </div>
+          </div>
+        )}
       </Card>
 
       <Card className="mb-4 py-0">

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { DesktopEvent, DesktopSettings, DesktopState, Prerequisites } from '../../../shared/src/desktop.ts';
 import type { Member, Role } from '../../../shared/src/index.ts';
 import { resolveClaudeBin, runClaudeSync } from '../../../cli/src/agent/claudeBin.ts';
+import { findRepos, uniqueNames } from '../../../cli/src/projects.ts';
 import { fixEnvironment } from './env.ts';
 import { clearSettings, loadSettings, newSettings, saveSettings, updateSettings } from './settings.ts';
 import { hubError, hubRunning, startHub, stopHub } from './hubHost.ts';
@@ -203,7 +204,8 @@ function registerIpc() {
     const opts = { title: 'Choose your project folder', properties: ['openDirectory' as const] };
     const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
     if (r.canceled || !r.filePaths[0]) return null;
-    return { path: r.filePaths[0], isGit: existsSync(join(r.filePaths[0], '.git')) };
+    const path = r.filePaths[0];
+    return { path, isGit: existsSync(join(path, '.git')), repos: findRepos(path) };
   });
 
   handle('settings:update', (patch: Partial<DesktopSettings>) => {
@@ -214,9 +216,15 @@ function registerIpc() {
       catch (e) { throw new Error(`Could not update Claude Code: ${(e as Error).message}`); }
     }
     if (patch.launchAtLogin !== undefined) app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin, args: ['--hidden'] });
+    if (patch.projects) {
+      const valid = patch.projects.filter(p => existsSync(join(p.path, '.git')));
+      if (valid.length !== patch.projects.length) throw new Error('Every project must be a git repository.');
+      patch = { ...patch, projects: uniqueNames(valid), repoPath: valid[0]?.path ?? null };
+    }
     const s = updateSettings(patch);
-    // The agent reads the project folder at start, so restart it when that changes.
-    if (s.onboarded && patch.repoPath !== undefined && patch.repoPath !== before.repoPath) startAgent(s, hooks);
+    // The agent reads the projects at start, so restart it when they change.
+    const projectsChanged = JSON.stringify([s.projects, s.workspaceRoot]) !== JSON.stringify([before.projects, before.workspaceRoot]);
+    if (s.onboarded && projectsChanged) startAgent(s, hooks);
     changed();
     return state();
   });

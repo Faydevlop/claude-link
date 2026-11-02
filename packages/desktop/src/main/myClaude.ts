@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { resolveClaudeBin, spawnClaude } from '../../../cli/src/agent/claudeBin.ts';
 import type { MyClaudeMessage, MyClaudeSession } from '../../../shared/src/desktop.ts';
 import { dataDir, loadSettings } from './settings.ts';
+import { describeProjects, workspaceFor } from '../../../cli/src/projects.ts';
 
 const READ_TOOLS = ['Read', 'Grep', 'Glob', 'WebSearch', 'WebFetch', 'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git diff:*)', 'Bash(git show:*)', 'Bash(ls:*)'];
 const EDIT_TOOLS = [...READ_TOOLS, 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash'];
@@ -84,6 +85,7 @@ export function sendMessage(input: { sessionId: string | null; text: string; mod
   persist();
 
   const edit = input.mode === 'edit';
+  const ws = workspaceFor(settings);
   const args = [
     '-p', '--output-format', 'stream-json', '--verbose',
     '--permission-mode', edit ? 'acceptEdits' : 'default',
@@ -93,11 +95,13 @@ export function sendMessage(input: { sessionId: string | null; text: string; mod
     `You are ${settings.name}'s Claude Code, running inside the Claude Link desktop app for the team "${settings.teamName}". ` +
     'The claude-link tools connect you to teammates and their Claudes: use ask_claude to ask another teammate\'s Claude about their code ' +
     '(mode "fix" asks them to change it, which their owner approves), report_status to update the team lead, and the chat tools to message people. ' +
-    (edit ? 'You may edit files and run commands in this project.' : 'This session is read-only: do not try to modify files.'),
+    (ws && ws.projects.length > 1 ? `${settings.name}'s projects: ${describeProjects(ws.projects)}. ` : '') +
+    (edit ? 'You may edit files and run commands in these projects.' : 'This session is read-only: do not try to modify files.'),
   ];
   if (s.claudeSessionId) args.push('--resume', s.claudeSessionId);
+  for (const d of ws?.addDirs ?? []) args.push('--add-dir', d);
 
-  const cwd = settings.repoPath && existsSync(settings.repoPath) ? settings.repoPath : homedir();
+  const cwd = ws?.cwd ?? homedir();
   const child = spawnClaude(resolveClaudeBin(settings.claudeBin), args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], env: process.env });
   running.set(s.id, child);
 

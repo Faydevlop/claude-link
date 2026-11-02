@@ -35,6 +35,7 @@ function notify(title: string, body: string, hooks: Hooks, tab?: string) {
 
 const toConfig = (s: DesktopSettings): Config => ({
   hubUrl: s.hubUrl, token: s.token, memberId: s.memberId, name: s.name, repoPath: s.repoPath,
+  projects: s.projects, workspaceRoot: s.workspaceRoot,
   claudeBin: s.claudeBin, taskTimeoutMinutes: s.taskTimeoutMinutes, fixAllowedTools: s.fixAllowedTools,
 });
 

@@ -37,7 +37,21 @@ export default function StatusBoard() {
                   <p className="mt-1.5 text-sm whitespace-pre-wrap">{s.summary}</p>
                 </div>
               ) : <p className="text-sm text-stone-400">No status reported yet.</p>}
-              {m.git && (
+              {m.git?.projects && m.git.projects.length > 1 ? (
+                <div className="space-y-1.5 rounded-lg bg-stone-50 p-2.5 text-xs dark:bg-stone-950">
+                  {m.git.projects.map(p => (
+                    <div key={p.name}>
+                      <div className="flex justify-between gap-2 font-mono">
+                        <span className="truncate"><span className="font-sans font-semibold">{p.name}</span> ⎇ {p.branch}</span>
+                        <span className={p.dirtyFiles.length ? 'shrink-0 text-amber-600' : 'shrink-0 text-stone-400'}>{p.dirtyFiles.length} uncommitted</span>
+                      </div>
+                      {p.recentCommits[0] && (
+                        <div className="flex gap-2 text-stone-500"><span className="truncate">{p.recentCommits[0].subject}</span><span className="ml-auto shrink-0 text-stone-400">{timeAgo(p.recentCommits[0].at)}</span></div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : m.git && (
                 <div className="rounded-lg bg-stone-50 p-2.5 text-xs dark:bg-stone-950">
                   <div className="flex justify-between font-mono">
                     <span className="truncate">⎇ {m.git.branch}</span>

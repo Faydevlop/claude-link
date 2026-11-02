@@ -70,7 +70,7 @@ function Shell({ desktopState, onDesktopState, onLogout }: { desktopState?: Desk
 
   const page = {
     status: <StatusBoard />, chat: <Chat />, tasks: <Tasks />, requests: <Tasks />, members: <Members />, audit: <Audit />,
-    myclaude: desktopState ? <MyClaude repoPath={desktopState.settings?.repoPath ?? null} /> : null,
+    myclaude: desktopState ? <MyClaude projects={desktopState.settings?.projects ?? []} /> : null,
     settings: desktopState && onDesktopState ? <Settings state={desktopState} onState={onDesktopState} /> : null,
   }[tab];
 

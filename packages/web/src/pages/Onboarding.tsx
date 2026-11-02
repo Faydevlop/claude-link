@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import type { Role } from '../api.ts';
 import { desktop, type DesktopState, type DiscoveredTeam, type Prerequisites } from '../desktop.ts';
 import { Button, cx, inputCls, ROLE_LABEL } from '../ui.tsx';
+import ProjectsPicker, { type ProjectSelection } from '../ProjectsPicker.tsx';
 
 type Path = 'lead' | 'member';
 type Step = 'welcome' | 'prereqs' | 'lead' | 'find' | 'token' | 'waiting' | 'folder' | 'permissions';
@@ -100,8 +101,10 @@ export default function Onboarding({ initial, onDone }: { initial: DesktopState;
     return () => clearInterval(t);
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---- step: folder ----
-  const [folder, setFolder] = useState<{ path: string; isGit: boolean } | null>(null);
+  // ---- step: projects ----
+  const [selection, setSelection] = useState<ProjectSelection>({
+    projects: initial.settings?.projects ?? [], workspaceRoot: initial.settings?.workspaceRoot ?? null,
+  });
 
   // ---- step: permissions ----
   const [autoReads, setAutoReads] = useState(true);
@@ -260,22 +263,14 @@ export default function Onboarding({ initial, onDone }: { initial: DesktopState;
   );
 
   if (step === 'folder') return (
-    <Frame step={step} path={path} title="Choose your project folder"
-      subtitle="Questions from teammates' Claudes are answered from this folder, and approved fixes are made on a new branch here. Your own work is never touched.">
-      <div className="rounded-xl border-2 border-dashed border-stone-300 p-6 text-center dark:border-stone-700">
-        {folder ? (
-          <>
-            <div className="break-all font-mono text-sm">{folder.path}</div>
-            {!folder.isGit && <div className="mt-2 text-sm text-amber-600">This folder isn't a git repository. Choose your project's root folder (the one with the .git folder).</div>}
-          </>
-        ) : <div className="text-sm text-stone-500">No folder selected</div>}
-        <Button className="mt-4" onClick={() => run(async () => { const f = await bridge.pickProjectFolder(); if (f) setFolder(f); })}>{folder ? 'Choose another…' : 'Choose folder…'}</Button>
-      </div>
+    <Frame step={step} path={path} title="Choose your projects"
+      subtitle="Teammates' questions are answered from these projects, and approved fixes are made on a new branch in them. Your own work is never touched.">
+      <ProjectsPicker value={selection} onChange={setSelection} />
       <Error text={error} />
       <div className="mt-6 flex justify-between">
         <button className="text-sm text-stone-500 underline" onClick={() => setStep('permissions')}>Skip for now</button>
-        <Button kind="primary" disabled={busy || !folder?.isGit} onClick={() => run(async () => {
-          setState(await bridge.updateSettings({ repoPath: folder!.path }));
+        <Button kind="primary" disabled={busy || !selection.projects.length} onClick={() => run(async () => {
+          setState(await bridge.updateSettings(selection));
           setStep('permissions');
         })}>Continue</Button>
       </div>

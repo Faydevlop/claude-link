@@ -1,6 +1,6 @@
 import { app } from 'electron';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { DesktopSettings } from '../../../shared/src/desktop.ts';
 
 // Stored in the same shape as the CLI's config.json, so the bundled MCP server can read it via CLAUDE_LINK_HOME.
@@ -14,6 +14,11 @@ export function loadSettings(): DesktopSettings | null {
   if (!existsSync(file())) return null;
   try { current = JSON.parse(readFileSync(file(), 'utf8')) as DesktopSettings; }
   catch { current = null; }
+  // Settings from before multi-project support only had repoPath.
+  if (current && !current.projects) {
+    current.projects = current.repoPath ? [{ name: basename(current.repoPath), path: current.repoPath }] : [];
+    current.workspaceRoot = null;
+  }
   return current;
 }
 
@@ -36,6 +41,6 @@ export function clearSettings() {
   current = null;
 }
 
-export const newSettings = (s: Omit<DesktopSettings, 'autoApproveReads' | 'launchAtLogin' | 'claudeCodeIntegration' | 'onboarded' | 'repoPath'>): DesktopSettings => ({
-  repoPath: null, autoApproveReads: true, launchAtLogin: false, claudeCodeIntegration: false, onboarded: false, ...s,
+export const newSettings = (s: Omit<DesktopSettings, 'autoApproveReads' | 'launchAtLogin' | 'claudeCodeIntegration' | 'onboarded' | 'repoPath' | 'projects' | 'workspaceRoot'>): DesktopSettings => ({
+  repoPath: null, projects: [], workspaceRoot: null, autoApproveReads: true, launchAtLogin: false, claudeCodeIntegration: false, onboarded: false, ...s,
 });

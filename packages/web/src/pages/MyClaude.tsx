@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { desktop, type MyClaudeSession } from '../desktop.ts';
+import type { Project } from '../../../shared/src/index.ts';
 import { useStore } from '../store.tsx';
 import { Button, cx, Empty, inputCls } from '../ui.tsx';
 
@@ -10,7 +11,7 @@ const SUGGESTIONS = [
   'Explain the folder structure of my project',
 ];
 
-export default function MyClaude({ repoPath }: { repoPath: string | null }) {
+export default function MyClaude({ projects }: { projects: Project[] }) {
   const bridge = desktop!;
   const { me } = useStore();
   const [sessions, setSessions] = useState<MyClaudeSession[]>([]);
@@ -67,7 +68,10 @@ export default function MyClaude({ repoPath }: { repoPath: string | null }) {
         <header className="flex flex-wrap items-center gap-3 border-b border-stone-200 px-4 py-3 dark:border-stone-800">
           <div className="min-w-0">
             <div className="font-semibold">My Claude</div>
-            <div className="truncate text-xs text-stone-500">{repoPath ? `Working in ${repoPath}` : 'No project folder set (Settings → Project folder)'}</div>
+            <div className="truncate text-xs text-stone-500" title={projects.map(p => p.path).join('\n')}>
+              {projects.length === 0 ? 'No project set (Settings → Projects)'
+                : projects.length === 1 ? `Working in ${projects[0]!.name}` : `Working across ${projects.length} projects: ${projects.map(p => p.name).join(', ')}`}
+            </div>
           </div>
           <div className="ml-auto flex rounded-lg bg-stone-200/70 p-0.5 text-sm dark:bg-stone-800">
             {(['ask', 'edit'] as const).map(m => (
