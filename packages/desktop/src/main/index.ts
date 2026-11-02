@@ -10,13 +10,15 @@ import { fixEnvironment } from './env.ts';
 import { clearSettings, loadSettings, newSettings, saveSettings, updateSettings } from './settings.ts';
 import { hubError, hubRunning, startHub, stopHub } from './hubHost.ts';
 import { discoverTeams, lanAddresses, probeHub } from './network.ts';
-import { agentLog, agentState, startAgent, stopAgent } from './agentHost.ts';
+import { agentLog, agentState, notify, startAgent, stopAgent } from './agentHost.ts';
 import { listSessions, removeSession, sendMessage, stopSession } from './myClaude.ts';
 import { setClaudeCodeIntegration } from './integration.ts';
 
 // Lets one machine run several identities while testing: CLAUDE_LINK_PROFILE=bob.
 if (process.env.CLAUDE_LINK_PROFILE) app.setPath('userData', `${app.getPath('userData')}-${process.env.CLAUDE_LINK_PROFILE}`);
 fixEnvironment();
+// Windows only shows notifications for apps whose ID matches the installer's Start-menu shortcut.
+if (process.platform === 'win32') app.setAppUserModelId('com.claudelink.desktop');
 
 const assets = app.isPackaged ? process.resourcesPath : join(__dirname, '../../build');
 const webDir = join(__dirname, '../renderer');
@@ -237,7 +239,7 @@ function registerIpc() {
   });
 
   handle('setup:testNotification', () => {
-    if (Notification.isSupported()) new Notification({ title: 'Claude Link', body: 'Notifications are working. You\'ll be alerted when a teammate needs you.' }).show();
+    notify('Claude Link', 'Notifications are working. You\'ll be alerted when a teammate needs you.', hooks);
   });
 
   handle('settings:leave', async () => {

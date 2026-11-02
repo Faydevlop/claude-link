@@ -22,14 +22,20 @@ function log(line: string) {
   if (agentLog.length > MAX_LOG) agentLog.splice(0, agentLog.length - MAX_LOG);
 }
 
-function notify(title: string, body: string, hooks: Hooks, tab?: string) {
-  if (!Notification.isSupported()) return;
+// Keep notifications referenced until dismissed; a collected one loses its click handler.
+const live = new Set<Notification>();
+
+export function notify(title: string, body: string, hooks: Hooks, tab?: string) {
+  if (!Notification.isSupported()) { log('Notifications are not supported on this system.'); hooks.changed(); return; }
   const n = new Notification({ title, body, silent: false });
+  live.add(n);
   n.on('click', () => {
     const w = hooks.window();
     if (w) { w.show(); w.focus(); }
     if (tab) hooks.navigate(tab);
   });
+  n.on('close', () => live.delete(n));
+  n.on('failed', (_e, error) => { live.delete(n); log(`Notification failed: ${error}`); hooks.changed(); });
   n.show();
 }
 
