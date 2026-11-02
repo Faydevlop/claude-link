@@ -41,7 +41,7 @@ The app checks for Claude Code and Git during setup.
 2. Enter your name and the team name, then click **Create team**. When asked, allow incoming connections:
    - Mac: macOS asks whether to accept incoming network connections. Click **Allow**.
    - Windows: the Defender Firewall prompt appears. Tick **Private networks** and click **Allow**.
-3. Choose your project folder.
+3. Choose your projects: **One project**, or **Several projects** if your repositories (e.g. frontend, backend) live in one folder. Pick that folder and every git repository inside is listed; untick any you don't want, or add projects from elsewhere.
 4. Set your permissions, then click **Finish setup**.
 5. Keep the app open while the team works. Closing the window keeps it running in the menu bar (Mac) or system tray (Windows).
 6. When a teammate asks to join, you get a notification. Open **Members** and click **Approve**.
@@ -51,7 +51,7 @@ The app checks for Claude Code and Git during setup.
 2. Pick your team from the list. If it doesn't show up, type the address shown in the lead's **Settings → Team address**.
 3. Enter your name and role, then click **Send join request**.
 4. Wait for the lead to approve. The app continues by itself once they do.
-5. Choose your project folder, set your permissions, then click **Finish setup**.
+5. Choose your projects (**One project** or **Several projects**, as above), set your permissions, then click **Finish setup**.
 
 Alternatively, the lead can add you under **Members → Add member** and send you an address and token. Use **Join a team → I have a token**.
 
@@ -61,8 +61,12 @@ Alternatively, the lead can add you under **Members → Add member** and send yo
   - **Ask** mode is read-only.
   - **Edit** mode can change files and run commands.
 - **Approvals:** when someone's Claude wants to change your code, you get a notification and a yellow **Approve / Reject** banner.
+- **Several projects:**
+  - Questions can read all of them.
+  - A fix gets a separate working copy of each project on the same `claude-link/task-N` branch. The branch is kept only in the projects that actually changed.
+  - The diff is labelled by project, e.g. `backend/app.txt`.
 - **Settings:**
-  - change your project folder;
+  - add or remove projects;
   - turn automatic answers to questions on or off;
   - start the app when you log in;
   - optionally add the team tools to your regular Claude Code in VS Code or the terminal (off by default).
@@ -115,6 +119,8 @@ claude-link agent
 ```bash
 # same install steps (clone, npm install, cd packages/cli && npm link), then:
 claude-link join http://<lead-ip>:4545 --token <their-token> --repo ~/work/project [--hooks]
+# several projects: --workspace ~/work   (adds every git repository inside)
+#               or: --repo ~/work/frontend ~/work/backend
 claude-link agent          # keep this running while you work
 ```
 `join` checks the token, saves `~/.claude-link/config.json`, and registers the `claude-link` MCP server with Claude Code at user scope. The optional `--hooks` flag also adds a Claude Code hook that reports each commit to the lead's status board.
