@@ -38,7 +38,7 @@ const fmtMessages = (msgs: Message[], names: Map<number, string>) => msgs.map(m 
 
 export async function mcpCommand() {
   const config = loadConfig();
-  const api = makeApi(config, 'mcp');
+  const api = makeApi(config, 'mcp', { reloadToken: true });
   const names = async () => new Map((await api<Member[]>('GET', '/api/members')).map(m => [m.id, m.name]));
 
   const server = new McpServer({ name: 'claude-link', version: '0.1.0' }, {

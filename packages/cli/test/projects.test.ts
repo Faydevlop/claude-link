@@ -1,14 +1,16 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { findRepos, uniqueNames, workspaceFor } from '../src/projects.ts';
 import { runTask } from '../src/agent/runner.ts';
 import type { Config } from '../src/config.ts';
 import type { Task } from '../../shared/src/index.ts';
+import { installFakeClaude } from './fakeClaude.ts';
 
 let dir: string;
+const savedEnv = { ...process.env };
 
 const repo = (path: string, files: Record<string, string> = { 'app.txt': 'hello\n' }) => {
   mkdirSync(path, { recursive: true });
@@ -19,35 +21,16 @@ const repo = (path: string, files: Record<string, string> = { 'app.txt': 'hello\
   g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
 };
 
-// Stands in for Claude Code: echoes where it ran, and in fix mode edits backend/app.txt only.
-const FAKE_CLAUDE = `#!/usr/bin/env node
-const fs = require('fs'), path = require('path'), { execSync } = require('child_process');
-let prompt = ''; process.stdin.on('data', d => prompt += d).on('end', () => {
-  const argv = process.argv.slice(2);
-  const addDirs = argv.flatMap((a, i) => a === '--add-dir' ? [argv[i + 1]] : []);
-  const fix = argv.includes('acceptEdits');
-  if (fix) {
-    const target = fs.existsSync('backend') ? 'backend/app.txt' : 'app.txt';
-    fs.writeFileSync(target, 'hello fixed\\n');
-  }
-  const out = o => console.log(JSON.stringify(o));
-  out({ type: 'system', subtype: 'init', session_id: 's1' });
-  out({ type: 'result', subtype: 'success', is_error: false, session_id: 's1',
-    result: JSON.stringify({ cwd: process.cwd(), entries: fs.readdirSync('.').sort(), addDirs,
-      disallowed: argv[argv.indexOf('--disallowedTools') + 1],
-      backendLog: fs.existsSync('backend') ? execSync('git -C backend log -p', { encoding: 'utf8' }) : '' }) });
-});
-`;
-
-const task = (mode: 'read' | 'fix'): Task => ({
-  id: 7, fromId: 1, toId: 2, mode, status: 'queued', title: 'Fix greeting', prompt: 'do it',
-  result: null, diff: null, branch: null, threadId: 1, createdAt: '', updatedAt: '',
+const task = (mode: 'read' | 'fix', prompt = 'do it'): Task => ({
+  id: 7, fromId: 1, toId: 2, mode, status: 'queued', title: 'Fix greeting', prompt,
+  result: null, diff: null, branch: null, threadId: 1, approvedBy: null, approvedAt: null, approvalHash: null, createdAt: '', updatedAt: '',
 });
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'claude-link-projects-'));
   process.env.CLAUDE_LINK_HOME = join(dir, 'home');
 });
+afterEach(() => { process.env = { ...savedEnv }; });
 
 describe('project discovery', () => {
   it('finds repositories inside a workspace folder, skipping dependencies and nested repos', () => {
@@ -80,45 +63,89 @@ describe('project discovery', () => {
   });
 });
 
-describe('running tasks across several projects', () => {
-  const config = (): Config => {
-    const bin = join(dir, 'fake-claude.js');
-    writeFileSync(bin, FAKE_CLAUDE);
-    chmodSync(bin, 0o755);
+describe('running tasks across several projects', { timeout: 30_000 }, () => {
+  const config = (extra: Partial<Config> = {}): Config => {
+    const bin = installFakeClaude(dir);
     repo(join(dir, 'ws', 'frontend'));
     repo(join(dir, 'ws', 'backend'));
     return {
-      hubUrl: 'http://x', token: 't', memberId: 2, name: 'Ben', claudeBin: bin, workspaceRoot: join(dir, 'ws'),
+      hubUrl: 'https://x', token: 't', memberId: 2, name: 'Ben', claudeBin: bin, workspaceRoot: join(dir, 'ws'),
       repoPath: join(dir, 'ws', 'frontend'),
       projects: [{ name: 'frontend', path: join(dir, 'ws', 'frontend') }, { name: 'backend', path: join(dir, 'ws', 'backend') }],
+      ...extra,
     };
   };
   const requester = { id: 1, name: 'Ana', role: 'lead' as const };
+  const run = async (mode: 'read' | 'fix', c: Config, prompt?: string) => {
+    const res = await runTask(task(mode, prompt), requester, null, c, () => {});
+    expect(res.ok, res.result).toBe(true);
+    // Fix results have a summary appended after Claude's answer.
+    return { res, out: JSON.parse(res.result.split(String.fromCharCode(10, 10))[0]!) };
+  };
 
   it('answers questions from the workspace folder', async () => {
-    const res = await runTask(task('read'), requester, null, config(), () => {});
-    expect(res.ok).toBe(true);
-    expect(JSON.parse(res.result).cwd).toContain(join('ws'));
-    expect(JSON.parse(res.result).entries).toEqual(['backend', 'frontend']);
+    const { out } = await run('read', config());
+    expect(out.cwd).toContain(join('ws'));
+    expect(out.entries).toEqual(['backend', 'frontend']);
   });
 
-  it('keeps env files out of reach', async () => {
+  it('runs questions read-only: no shell, no edits, no web, owner settings ignored', async () => {
+    const { out } = await run('read', config());
+    expect(out.argv).toContain('--restricted');
+    expect(out.argv).toContain('--strict-mcp-config');
+    expect(out.tools).toBe('Read,Grep,Glob');
+    expect(out.mode).toBe('dontAsk');
+    expect(out.argv).toEqual(expect.arrayContaining(['--permission-prompts', 'none']));
+    // Nothing broad is allowed; the only extra is Claude Link's read-only git server.
+    expect(out.allowed).toEqual(['mcp__claude-link-git']);
+    expect(out.disallowed).toEqual(expect.arrayContaining(['Bash', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch']));
+    // Only the git server is configured, and it only knows the shared projects.
+    expect(Object.keys(out.mcp.mcpServers)).toEqual(['claude-link-git']);
+  });
+
+  it('keeps secrets out of reach: env files, SSH keys, cloud credentials, Claude Link token', async () => {
     const c = config();
     const backend = join(dir, 'ws', 'backend');
     writeFileSync(join(backend, '.env'), 'DB_PASSWORD=hunter2\n');
     execFileSync('git', ['add', '.env'], { cwd: backend });
     execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'env'], { cwd: backend });
-    const out = JSON.parse((await runTask(task('read'), requester, null, c, () => {})).result);
-    expect(out.disallowed.split(',')).toEqual(expect.arrayContaining(['Read(**/.env)', 'Read(**/.env.*)', 'Edit(**/.env)', 'Bash(git show *.env*)']));
+    const { out } = await run('read', c);
+    expect(out.disallowed).toEqual(expect.arrayContaining([
+      'Read(**/.env)', 'Read(**/.env.*)', 'Edit(**/.env)', 'Bash(git show *.env*)', 'Read(~/.ssh/**)', 'Read(~/.aws/**)', 'Read(~/.claude/**)',
+    ]));
+    // Absolute form too, and Claude Link's own data folder (which holds the token).
+    expect(out.disallowed.some((r: string) => r.startsWith('Read(//') && r.endsWith('/.ssh/**)'))).toBe(true);
+    expect(out.disallowed.some((r: string) => r.startsWith('Read(//') && r.includes('home/**'))).toBe(true);
     // Git history shows that the file changed, never what is in it.
     expect(out.backendLog).toContain('Binary files /dev/null and b/.env differ');
     expect(out.backendLog).not.toContain('hunter2');
   });
 
+  it('does not hand teammates\' requests the owner\'s other credentials', async () => {
+    process.env.GITHUB_TOKEN = 'ghp_secret';
+    process.env.SSH_AUTH_SOCK = '/tmp/agent.sock';
+    process.env.AWS_SECRET_ACCESS_KEY = 'aws';
+    process.env.DATABASE_URL = 'postgres://u:pw@db/x';
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-keep';
+    const { out } = await run('read', config());
+    expect(out.env).not.toEqual(expect.arrayContaining(['GITHUB_TOKEN']));
+    for (const k of ['GITHUB_TOKEN', 'SSH_AUTH_SOCK', 'AWS_SECRET_ACCESS_KEY', 'DATABASE_URL']) expect(out.env).not.toContain(k);
+    // Claude Code's own authentication still works.
+    expect(out.env).toContain('ANTHROPIC_API_KEY');
+  });
+
+  it('falls back to an explicit deny list on Claude Code versions without --restricted/--tools', async () => {
+    process.env.FAKE_CLAUDE_OLD = '1';
+    const { out } = await run('read', config());
+    expect(out.argv).not.toContain('--restricted');
+    expect(out.tools).toBeUndefined();
+    expect(out.mode).toBe('default');
+    expect(out.disallowed).toEqual(expect.arrayContaining(['Bash', 'Edit', 'Write', 'WebFetch', 'Task']));
+  });
+
   it('gives a fix a worktree of every project and keeps the branch only where files changed', async () => {
     const c = config();
-    const res = await runTask(task('fix'), requester, null, c, () => {});
-    expect(res.ok).toBe(true);
+    const { res } = await run('fix', c);
     expect(res.branch).toBe('claude-link/task-7');
     expect(res.result).toContain('Changed project: backend.');
     // Combined diff is labelled by project.
@@ -131,6 +158,58 @@ describe('running tasks across several projects', () => {
     // The owner's checkouts are untouched and temporary worktrees are gone.
     expect(readFileSync(join(dir, 'ws', 'backend', 'app.txt'), 'utf8')).toBe('hello\n');
     expect(execFileSync('git', ['worktree', 'list'], { cwd: join(dir, 'ws', 'backend'), encoding: 'utf8' }).trim().split('\n')).toHaveLength(1);
-    expect(existsSync(join(dir, 'home', 'worktrees')) && execFileSync('ls', [join(dir, 'home', 'worktrees')], { encoding: 'utf8' }).trim()).toBeFalsy();
+    const wt = join(dir, 'home', 'worktrees');
+    expect(existsSync(wt) ? readdirSync(wt) : []).toEqual([]);
+  });
+
+  it('bounds a fix: edits only in the worktrees, never the real checkout, git internals or Claude settings', async () => {
+    const c = config();
+    const res = await runTask(task('fix', 'KEEPSAME'), requester, null, c, () => {});
+    const out = JSON.parse(res.result.split('\n\n')[0]!);
+    expect(out.mode).toBe('acceptEdits');
+    expect(out.tools).toBe('Read,Grep,Glob,Edit,Write');
+    expect(out.argv).toContain('--restricted');
+    // No broad allow rule for edits: acceptEdits only covers the working directories.
+    expect(out.allowed).not.toContain('Edit');
+    expect(out.allowed).not.toContain('Write');
+    const backend = join(dir, 'ws', 'backend').replace(/\\/g, '/');
+    expect(out.disallowed.some((r: string) => r.startsWith('Edit(//') && r.toLowerCase().includes(backend.slice(3).toLowerCase()))).toBe(true);
+    expect(out.disallowed).toEqual(expect.arrayContaining(['Edit(**/.git/**)', 'Edit(**/.claude/**)', 'Bash', 'WebFetch']));
+    expect(res.result).toContain('No files were changed');
+  });
+
+  it('only passes specific extra commands from config to fixes', async () => {
+    const c = config({ fixAllowedTools: ['Bash(npm test:*)', 'Bash', 'Bash(*)', 'Edit', 'Read(//etc/**)'] });
+    const res = await runTask(task('fix', 'KEEPSAME'), requester, null, c, () => {});
+    const out = JSON.parse(res.result.split('\n\n')[0]!);
+    expect(out.allowed).toEqual(['mcp__claude-link-git', 'Bash(npm test:*)']);
+    expect(out.tools).toBe('Read,Grep,Glob,Edit,Write,Bash');
+  });
+
+  it('commits without running the repository\'s hooks', async () => {
+    const c = config();
+    const hooks = join(dir, 'ws', 'backend', '.git', 'hooks');
+    writeFileSync(join(hooks, 'pre-commit'), '#!/bin/sh\necho hook-ran > "$GIT_DIR/../hook-ran"\nexit 1\n', { mode: 0o755 });
+    const { res } = await run('fix', c);
+    expect(res.branch).toBe('claude-link/task-7');
+    expect(existsSync(join(dir, 'ws', 'backend', 'hook-ran'))).toBe(false);
+  });
+
+  it('stops Claude when the agent is cancelled', async () => {
+    const c = config();
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 1500);
+    const started = Date.now();
+    const res = await runTask(task('read', 'HANG'), requester, null, c, () => {}, ac.signal);
+    expect(res.ok).toBe(false);
+    expect(res.result).toMatch(/Cancelled/);
+    expect(Date.now() - started).toBeLessThan(15_000);
+  }, 20_000);
+
+  it('never leaves policy files behind', async () => {
+    await run('read', config());
+    const runDir = join(dir, 'home', 'run');
+    expect(existsSync(runDir) ? readdirSync(runDir) : []).toEqual([]);
+    expect(homedir()).toBeTruthy();
   });
 });

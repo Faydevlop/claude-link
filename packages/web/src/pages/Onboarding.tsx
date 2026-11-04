@@ -88,6 +88,7 @@ export default function Onboarding({ initial, onDone }: { initial: DesktopState;
 
   // ---- step: waiting for approval ----
   const [waitStatus, setWaitStatus] = useState('pending');
+  const [code, setCode] = useState('');
   useEffect(() => {
     if (step !== 'waiting') return;
     const t = setInterval(async () => {
@@ -205,7 +206,11 @@ export default function Onboarding({ initial, onDone }: { initial: DesktopState;
             <button key={t.url} onClick={() => { setSelected(t.url); setManual(''); }}
               className={cx('flex w-full items-center gap-3 px-4 py-3 text-left', selected === t.url ? 'bg-brand/10' : 'hover:bg-stone-50 dark:hover:bg-stone-800/50')}>
               <span className={cx('size-4 rounded-full border-2', selected === t.url ? 'border-brand bg-brand' : 'border-stone-300')} />
-              <div className="min-w-0 flex-1"><div className="font-medium">{t.team}</div><div className="text-xs text-stone-500">Lead: {t.lead ?? '?'} · {t.url.replace('http://', '')}</div></div>
+              <div className="min-w-0 flex-1"><div className="font-medium">{t.team}</div><div className="text-xs text-stone-500">Lead: {t.lead ?? '?'} · {t.url.replace(/^https?:\/\//, '')}</div></div>
+              <span className={cx('rounded-full px-2 py-0.5 text-xs', t.encrypted ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300')}
+                title={t.encrypted ? `Certificate ${t.fingerprint}` : 'This team server is an older version without encryption.'}>
+                {t.encrypted ? '🔒 Encrypted' : 'Not encrypted'}
+              </span>
             </button>
           ))}
         </div>
@@ -226,7 +231,8 @@ export default function Onboarding({ initial, onDone }: { initial: DesktopState;
           <div className="flex items-center gap-3">
             <button className="text-sm text-stone-500 underline" onClick={() => { setError(''); setStep('token'); }}>I have a token</button>
             <Button kind="primary" disabled={busy || !target || !name.trim()} onClick={() => run(async () => {
-              await bridge.requestJoin({ hubUrl: target!, name: name.trim(), role });
+              const r = await bridge.requestJoin({ hubUrl: target!, name: name.trim(), role });
+              setCode(r.verificationCode);
               setWaitStatus('pending');
               setStep('waiting');
             })}>{busy ? 'Sending…' : 'Send join request'}</Button>
@@ -242,6 +248,7 @@ export default function Onboarding({ initial, onDone }: { initial: DesktopState;
         <label className="block text-sm font-medium">Team address<input className={cx(inputCls, 'mt-1')} value={manual} onChange={e => setManual(e.target.value)} placeholder="192.168.1.77:4545" /></label>
         <label className="block text-sm font-medium">Token<input className={cx(inputCls, 'mt-1')} type="password" value={token} onChange={e => setToken(e.target.value)} placeholder="cl_…" /></label>
       </div>
+      <p className="mt-3 text-xs text-stone-500">The connection is encrypted and this computer remembers the team server's certificate. You can compare its fingerprint with your lead's in Settings.</p>
       <Error text={error} />
       <div className="mt-6 flex justify-between">
         <Button onClick={() => setStep('find')}>Back</Button>
@@ -256,9 +263,18 @@ export default function Onboarding({ initial, onDone }: { initial: DesktopState;
   if (step === 'waiting') return (
     <Frame step={step} path={path} title={waitStatus === 'rejected' ? 'Request declined' : 'Waiting for approval…'}
       subtitle={waitStatus === 'rejected' ? 'Your team lead declined the request. Check with them and try again.' : 'Your team lead got a notification. This page continues automatically once they approve.'}>
-      {waitStatus !== 'rejected'
-        ? <div className="flex items-center gap-3 rounded-xl border border-stone-200 p-4 text-sm dark:border-stone-800"><span className="size-3 animate-pulse rounded-full bg-amber-500" />Request sent as <b>{name}</b> ({ROLE_LABEL[role]})</div>
-        : <Button onClick={() => setStep('find')}>Try again</Button>}
+      {waitStatus !== 'rejected' ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-3 rounded-xl border border-stone-200 p-4 text-sm dark:border-stone-800"><span className="size-3 animate-pulse rounded-full bg-amber-500" />Request sent as <b>{name}</b> ({ROLE_LABEL[role]})</div>
+          {code && (
+            <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm dark:border-sky-500/30 dark:bg-sky-500/10">
+              <div className="font-medium">Verification code</div>
+              <div className="my-2 font-mono text-3xl tracking-widest" aria-label={`Verification code ${code.split('').join(' ')}`}>{code}</div>
+              <div className="text-stone-600 dark:text-stone-300">Tell your lead this code. They see a code next to your request and should approve it only if the two match. A different code means someone else on the network is in the middle.</div>
+            </div>
+          )}
+        </div>
+      ) : <Button onClick={() => setStep('find')}>Try again</Button>}
     </Frame>
   );
 

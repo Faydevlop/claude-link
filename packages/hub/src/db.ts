@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import type {
-  AuditEntry, GitState, JoinRequest, JoinRequestStatus, Presence, Member, Message, Role, StatusUpdate, Task, TaskMode, TaskStatus, Thread, ThreadKind, AuthorKind, WorkState,
+  Access, AuditEntry, GitState, JoinRequest, JoinRequestStatus, Presence, Member, Message, Role, StatusUpdate, Task, TaskMode, TaskStatus, Thread, ThreadKind, AuthorKind, WorkState,
 } from '../../shared/src/index.ts';
 
 const MIGRATIONS = [
@@ -89,7 +89,22 @@ const MIGRATIONS = [
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
   );
   `,
+  // v3: access levels, approval binding, join verification codes, token age.
+  `
+  ALTER TABLE members ADD COLUMN access TEXT NOT NULL DEFAULT 'developer';
+  UPDATE members SET access = 'admin' WHERE is_lead = 1;
+  ALTER TABLE members ADD COLUMN token_created_at TEXT;
+  UPDATE members SET token_created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now');
+  ALTER TABLE tasks ADD COLUMN approved_by INTEGER;
+  ALTER TABLE tasks ADD COLUMN approved_at TEXT;
+  ALTER TABLE tasks ADD COLUMN approval_hash TEXT;
+  ALTER TABLE join_requests ADD COLUMN verify_code TEXT;
+  CREATE INDEX tasks_to_status ON tasks(to_id, status);
+  CREATE INDEX status_member ON status_updates(member_id, id);
+  `,
 ];
+
+export const SCHEMA_VERSION = MIGRATIONS.length;
 
 type Row = Record<string, any>;
 
@@ -103,13 +118,25 @@ export class Db {
 
   constructor(path: string) {
     this.sql = new DatabaseSync(path);
-    this.sql.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+    this.sql.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     const version = (this.sql.prepare('PRAGMA user_version').get() as Row).user_version as number;
+    if (version > MIGRATIONS.length) {
+      throw new Error(`hub.db was written by a newer Claude Link (schema ${version}; this version knows ${MIGRATIONS.length}). Update Claude Link.`);
+    }
+    // Upgrading an existing database: keep a copy first, so a failed upgrade never costs the team its history.
+    if (version > 0 && version < MIGRATIONS.length && path !== ':memory:') {
+      this.sql.prepare('VACUUM INTO ?').run(`${path}.backup-v${version}-${Date.now()}`);
+    }
     for (let v = version; v < MIGRATIONS.length; v++) {
       this.sql.exec('BEGIN');
-      this.sql.exec(MIGRATIONS[v]!);
-      this.sql.exec(`PRAGMA user_version = ${v + 1}`);
-      this.sql.exec('COMMIT');
+      try {
+        this.sql.exec(MIGRATIONS[v]!);
+        this.sql.exec(`PRAGMA user_version = ${v + 1}`);
+        this.sql.exec('COMMIT');
+      } catch (e) {
+        this.sql.exec('ROLLBACK');
+        throw new Error(`Database upgrade to schema ${v + 1} failed and was rolled back: ${(e as Error).message}`);
+      }
     }
   }
 
@@ -117,7 +144,7 @@ export class Db {
 
   private toMember(r: Row): Member {
     return {
-      id: r.id, name: r.name, role: r.role, isLead: !!r.is_lead,
+      id: r.id, name: r.name, role: r.role, isLead: !!r.is_lead, access: (r.is_lead ? 'admin' : r.access ?? 'developer') as Access,
       online: this.online.has(r.id), lastSeen: r.last_seen, repoPath: r.repo_path,
       git: parse(r.git_json) as GitState | null,
       presence: this.online.has(r.id) ? this.presence.get(r.id) ?? null : null,
@@ -130,9 +157,10 @@ export class Db {
     this.sql.prepare(`UPDATE members SET last_disconnected_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`).run(id);
   }
 
-  createMember(name: string, role: Role, isLead: boolean, tokenHash: string): Member {
-    const r = this.sql.prepare('INSERT INTO members (name, role, is_lead, token_hash) VALUES (?, ?, ?, ?) RETURNING *')
-      .get(name, role, isLead ? 1 : 0, tokenHash) as Row;
+  createMember(name: string, role: Role, isLead: boolean, tokenHash: string, access: Access = isLead ? 'admin' : 'developer'): Member {
+    const r = this.sql.prepare(`INSERT INTO members (name, role, is_lead, token_hash, access, token_created_at)
+      VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now')) RETURNING *`)
+      .get(name, role, isLead ? 1 : 0, tokenHash, isLead ? 'admin' : access) as Row;
     return this.toMember(r);
   }
 
@@ -155,14 +183,23 @@ export class Db {
     return r ? this.toMember(r) : null;
   }
 
-  updateMember(id: number, patch: { name?: string; role?: Role }): Member | null {
+  updateMember(id: number, patch: { name?: string; role?: Role; access?: Access }): Member | null {
     if (patch.name !== undefined) this.sql.prepare('UPDATE members SET name = ? WHERE id = ?').run(patch.name, id);
     if (patch.role !== undefined) this.sql.prepare('UPDATE members SET role = ? WHERE id = ?').run(patch.role, id);
+    if (patch.access !== undefined) this.sql.prepare('UPDATE members SET access = ? WHERE id = ? AND is_lead = 0').run(patch.access, id);
     return this.member(id);
   }
 
-  setTokenHash(id: number, hash: string) {
-    this.sql.prepare('UPDATE members SET token_hash = ? WHERE id = ?').run(hash, id);
+  /** A new token also restarts the idle clock. */
+  setTokenHash(id: number, hash: string, at = new Date().toISOString()) {
+    this.sql.prepare('UPDATE members SET token_hash = ?, token_created_at = ?, last_seen = NULL WHERE id = ?').run(hash, at, id);
+  }
+
+  /** The most recent of token issue time and last use: the start of the idle period. */
+  tokenActiveAt(id: number): string | null {
+    const r = this.sql.prepare('SELECT token_created_at AS c, last_seen AS s FROM members WHERE id = ?').get(id) as Row | undefined;
+    if (!r) return null;
+    return [r.c, r.s].filter(Boolean).sort().at(-1) ?? null;
   }
 
   setGit(id: number, git: GitState, repoPath: string | undefined) {
@@ -170,8 +207,8 @@ export class Db {
       .run(JSON.stringify(git), repoPath ?? null, id);
   }
 
-  touch(id: number) {
-    this.sql.prepare(`UPDATE members SET last_seen = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`).run(id);
+  touch(id: number, at = new Date().toISOString()) {
+    this.sql.prepare('UPDATE members SET last_seen = ? WHERE id = ?').run(at, id);
   }
 
   deleteMember(id: number) {
@@ -318,7 +355,9 @@ export class Db {
   private toTask(r: Row): Task {
     return {
       id: r.id, fromId: r.from_id, toId: r.to_id, mode: r.mode, status: r.status, title: r.title, prompt: r.prompt,
-      result: r.result, diff: r.diff, branch: r.branch, threadId: r.thread_id, createdAt: r.created_at, updatedAt: r.updated_at,
+      result: r.result, diff: r.diff, branch: r.branch, threadId: r.thread_id,
+      approvedBy: r.approved_by ?? null, approvedAt: r.approved_at ?? null, approvalHash: r.approval_hash ?? null,
+      createdAt: r.created_at, updatedAt: r.updated_at,
     };
   }
 
@@ -333,11 +372,31 @@ export class Db {
   }
 
   updateTask(id: number, patch: Partial<Pick<Task, 'status' | 'result' | 'diff' | 'branch'>>): Task {
-    const cols = Object.entries(patch).filter(([, v]) => v !== undefined);
+    // Column names come from this fixed list only, never from callers.
+    const cols = (['status', 'result', 'diff', 'branch'] as const).filter(k => patch[k] !== undefined).map(k => [k, patch[k]] as const);
     const set = cols.map(([k]) => `${k} = ?`).join(', ');
     this.sql.prepare(`UPDATE tasks SET ${set}${set ? ', ' : ''}updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`)
       .run(...cols.map(([, v]) => v as string), id);
     return this.task(id)!;
+  }
+
+  /**
+   * Moves a task to `to` only if it is still in one of the `from` statuses (compare-and-set).
+   * Returns null when it was not: e.g. a second agent process already claimed it, or it was finished.
+   */
+  transitionTask(id: number, from: TaskStatus[], to: TaskStatus, result?: string): Task | null {
+    const placeholders = from.map(() => '?').join(', ');
+    const r = this.sql.prepare(`UPDATE tasks SET status = ?, result = COALESCE(?, result), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE id = ? AND status IN (${placeholders}) RETURNING *`).get(to, result ?? null, id, ...from) as Row | undefined;
+    return r ? this.toTask(r) : null;
+  }
+
+  /** Records the owner's approval of a fix, bound to a hash of the exact request. */
+  approveTask(id: number, approverId: number, approvalHash: string): Task | null {
+    const r = this.sql.prepare(`UPDATE tasks SET status = 'queued', approved_by = ?, approval_hash = ?,
+      approved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE id = ? AND status = 'pending_approval' RETURNING *`).get(approverId, approvalHash, id) as Row | undefined;
+    return r ? this.toTask(r) : null;
   }
 
   tasksFor(viewer: Member): Task[] {
@@ -368,13 +427,20 @@ export class Db {
   private toJoinRequest(r: Row): JoinRequest {
     return {
       id: r.id, name: r.name, role: r.role, device: r.device, os: r.os, ip: r.ip,
-      status: r.status as JoinRequestStatus, memberId: r.member_id, createdAt: r.created_at,
+      status: r.status as JoinRequestStatus, memberId: r.member_id, verificationCode: r.verify_code ?? null, createdAt: r.created_at,
     };
   }
 
-  createJoinRequest(j: { name: string; role: Role; device: string; os: string; ip: string; secretHash: string }): JoinRequest {
-    return this.toJoinRequest(this.sql.prepare(`INSERT INTO join_requests (name, role, device, os, ip, secret_hash)
-      VALUES (?, ?, ?, ?, ?, ?) RETURNING *`).get(j.name, j.role, j.device, j.os, j.ip, j.secretHash) as Row);
+  createJoinRequest(j: { name: string; role: Role; device: string; os: string; ip: string; secretHash: string; verifyCode: string }): JoinRequest {
+    return this.toJoinRequest(this.sql.prepare(`INSERT INTO join_requests (name, role, device, os, ip, secret_hash, verify_code)
+      VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`).get(j.name, j.role, j.device, j.os, j.ip, j.secretHash, j.verifyCode) as Row);
+  }
+
+  /** Pending requests older than `minutes` lapse, so a stale request cannot be approved by accident later. */
+  expireJoinRequests(minutes: number): JoinRequest[] {
+    return (this.sql.prepare(`UPDATE join_requests SET status = 'rejected'
+      WHERE status = 'pending' AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) RETURNING *`).all(`-${minutes} minutes`) as Row[])
+      .map(r => this.toJoinRequest(r));
   }
 
   joinRequest(id: number): (JoinRequest & { secretHash: string }) | null {
@@ -398,8 +464,17 @@ export class Db {
       .run(actorId, action, target, meta ? JSON.stringify(meta) : null);
   }
 
-  auditLog(limit = 300): AuditEntry[] {
-    return (this.sql.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT ?').all(limit) as Row[]).map(r => ({
+  auditLog(limit = 300, opts: { before?: number; q?: string } = {}): AuditEntry[] {
+    const where: string[] = [];
+    const args: (string | number)[] = [];
+    if (opts.before) { where.push('id < ?'); args.push(opts.before); }
+    if (opts.q) {
+      const like = `%${opts.q.replace(/[%_\\]/g, '')}%`;
+      where.push('(action LIKE ? OR target LIKE ? OR meta_json LIKE ?)');
+      args.push(like, like, like);
+    }
+    const sql = `SELECT * FROM audit_log ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ?`;
+    return (this.sql.prepare(sql).all(...args, limit) as Row[]).map(r => ({
       id: r.id, actorId: r.actor_id, action: r.action, target: r.target, meta: parse(r.meta_json), createdAt: r.created_at,
     }));
   }

@@ -114,8 +114,14 @@ describe('tasks', () => {
     expect((await call(a.token, 'POST', `/api/tasks/${task.id}/approve`)).status).toBe(403);
     expect((await call(leadToken, 'POST', `/api/tasks/${task.id}/approve`)).status).toBe(403);
 
-    expect((await call(b.token, 'POST', `/api/tasks/${task.id}/approve`)).json.status).toBe('queued');
+    const approved = (await call(b.token, 'POST', `/api/tasks/${task.id}/approve`)).json;
+    expect(approved).toMatchObject({ status: 'queued', approvedBy: b.member.id });
+    expect(approved.approvalHash).toMatch(/^[0-9a-f]{64}$/);
     expect((await call(b.token, 'POST', `/api/tasks/${task.id}/approve`)).status).toBe(409);
+    // An approved fix still has to be claimed, with the hash of what was approved, before it can finish.
+    expect((await call(b.token, 'POST', `/api/tasks/${task.id}/complete`, { ok: true, result: 'x' })).status).toBe(409);
+    expect((await call(b.token, 'POST', `/api/tasks/${task.id}/claim`, { approvalHash: 'a'.repeat(64) })).status).toBe(409);
+    expect((await call(b.token, 'POST', `/api/tasks/${task.id}/claim`, { approvalHash: approved.approvalHash })).json.status).toBe('running');
     const done = (await call(b.token, 'POST', `/api/tasks/${task.id}/complete`, {
       ok: true, result: 'Fixed', diff: '+x', branch: 'claude-link/task-1',
     })).json;

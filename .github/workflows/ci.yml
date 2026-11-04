@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Git identity for test repositories
+        run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@example.com"
+      - name: Typecheck (CLI, hub, shared)
+        run: npm run typecheck
+      - name: Typecheck (desktop)
+        run: npx tsc -p packages/desktop/tsconfig.json --noEmit
+      - name: Typecheck (web)
+        run: npx tsc -p packages/web/tsconfig.json
+      - name: Tests (unit, integration, end-to-end)
+        run: npm test
+      - name: Build web dashboard
+        run: npm run build
+      - name: Build desktop app (no installer)
+        working-directory: packages/desktop
+        run: npx electron-vite build
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true

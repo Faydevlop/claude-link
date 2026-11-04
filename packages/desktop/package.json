@@ -1,7 +1,7 @@
 {
   "name": "@claude-link/desktop",
   "productName": "Claude Link",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license": "MIT",
   "private": true,
   "description": "Connect your team's Claude Code sessions over the office network",

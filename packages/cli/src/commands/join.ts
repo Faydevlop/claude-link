@@ -1,29 +1,29 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { createInterface } from 'node:readline/promises';
 import { makeApi } from '../api.ts';
 import { home, saveConfig } from '../config.ts';
 import { runClaudeSync } from '../agent/claudeBin.ts';
+import { selfCommand } from '../agent/selfCommand.ts';
 import type { Member, Project } from '../../../shared/src/index.ts';
 import { findRepos, uniqueNames } from '../projects.ts';
-
-const binPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../bin/claude-link.js');
+import { probeHubAddress } from '../net.ts';
 
 /** Command Claude Code runs to reach us; absolute paths so it works from any project. */
-const selfCommand = () => [process.execPath, binPath];
+const selfArgs = () => { const s = selfCommand([]); return [s.command, ...s.args]; };
 
 function registerMcp() {
   const env = process.env.CLAUDE_LINK_HOME ? ['-e', `CLAUDE_LINK_HOME=${home()}`] : [];
   try { runClaudeSync(['mcp', 'remove', '--scope', 'user', 'claude-link']); } catch { /* not registered yet */ }
-  runClaudeSync(['mcp', 'add', '--scope', 'user', ...env, 'claude-link', '--', ...selfCommand(), 'mcp']);
+  runClaudeSync(['mcp', 'add', '--scope', 'user', ...env, 'claude-link', '--', ...selfArgs(), 'mcp']);
 }
 
 function installHooks() {
   const settingsPath = join(homedir(), '.claude', 'settings.json');
   const settings = existsSync(settingsPath) ? JSON.parse(readFileSync(settingsPath, 'utf8')) : {};
   const prefix = process.env.CLAUDE_LINK_HOME ? `CLAUDE_LINK_HOME=${JSON.stringify(home())} ` : '';
-  const command = `${prefix}${selfCommand().map(s => JSON.stringify(s)).join(' ')} hook`;
+  const command = `${prefix}${selfArgs().map(s => JSON.stringify(s)).join(' ')} hook`;
   settings.hooks ??= {};
   settings.hooks.PostToolUse ??= [];
   // Replace any earlier Claude Link hook rather than stacking duplicates.
@@ -36,9 +36,31 @@ function installHooks() {
   console.log(`  ✓ Added a PostToolUse hook to ${settingsPath} (reports your commits to the team lead)`);
 }
 
-export async function joinCommand(hubUrl: string, opts: { token: string; repo?: string[]; workspace?: string; mcp: boolean; hooks?: boolean }) {
-  const url = new URL(hubUrl).origin;
-  const me = await makeApi({ hubUrl: url, token: opts.token })<Member>('GET', '/api/me');
+const normFp = (s: string) => s.toLowerCase().replace(/[^0-9a-f]/g, '');
+
+export async function joinCommand(hubUrl: string, opts: { token: string; repo?: string[]; workspace?: string; mcp: boolean; hooks?: boolean; fingerprint?: string }) {
+  const hub = await probeHubAddress(hubUrl);
+  if (hub.tls) {
+    // Trust on first use, confirmed by a person: compare with what the lead's hub printed.
+    console.log(`\n  Team server certificate (SHA-256):\n    ${hub.fingerprint}`);
+    if (opts.fingerprint) {
+      if (normFp(opts.fingerprint) !== normFp(hub.fingerprint!)) {
+        throw new Error('The certificate fingerprint does not match --fingerprint. Do not join: you may not be talking to your team\'s server.');
+      }
+      console.log('  ✓ Matches the fingerprint you were given.');
+    } else if (process.stdin.isTTY) {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      const answer = (await rl.question('  Does this match the fingerprint the lead\'s hub printed? [y/N] ')).trim().toLowerCase();
+      rl.close();
+      if (answer !== 'y' && answer !== 'yes') throw new Error('Not joined. Compare the fingerprint with the lead, or pass --fingerprint.');
+    } else {
+      throw new Error('Pass --fingerprint <sha256> (printed by the lead\'s hub) to join non-interactively.');
+    }
+  } else {
+    console.log('\n  ⚠ This team server does not use encryption. Your token will travel in the clear on the network.');
+  }
+
+  const me = await makeApi({ hubUrl: hub.url, token: opts.token, hubCert: hub.cert })<Member>('GET', '/api/me');
   const expand = (p: string) => resolve(p.replace(/^~(?=[\/])/, homedir()));
 
   let projects: Project[] = [];
@@ -54,8 +76,8 @@ export async function joinCommand(hubUrl: string, opts: { token: string; repo?: 
   }
   projects = uniqueNames(projects.filter((p, i) => projects.findIndex(q => q.path === p.path) === i));
 
-  saveConfig({ hubUrl: url, token: opts.token, memberId: me.id, name: me.name, repoPath: projects[0]?.path ?? null, projects, workspaceRoot });
-  console.log(`\n  ✓ Joined as ${me.name} (${me.role}) — config saved to ${home()}/config.json`);
+  saveConfig({ hubUrl: hub.url, hubCert: hub.cert, token: opts.token, memberId: me.id, name: me.name, repoPath: projects[0]?.path ?? null, projects, workspaceRoot });
+  console.log(`\n  ✓ Joined as ${me.name} (${me.role}, ${me.access ?? 'developer'}). Config saved to ${home()}/config.json`);
   for (const p of projects) console.log(`    project: ${p.name}  ${p.path}`);
 
   if (opts.mcp) {
@@ -67,5 +89,5 @@ export async function joinCommand(hubUrl: string, opts: { token: string; repo?: 
   console.log(`\n  Next: keep the agent running so teammates' Claudes can reach yours:`);
   console.log(`    claude-link agent`);
   if (!projects.length) console.log(`  (No project given: incoming questions and fixes need one. Re-run join with --repo <path> or --workspace <folder>.)`);
-  console.log(`  Web chat: ${url}  (log in with your token)\n`);
+  console.log(`  Web chat: ${hub.url}  (log in with your token)\n`);
 }

@@ -23,6 +23,7 @@ const bridge: DesktopBridge = {
   testNotification: () => invoke('setup:testNotification'),
   leaveTeam: () => invoke('settings:leave'),
   openExternal: url => invoke('app:openExternal', url),
+  decideTask: (taskId, approve) => invoke('tasks:decide', taskId, approve),
   myClaude: {
     list: () => invoke('myClaude:list'),
     send: input => invoke('myClaude:send', input),

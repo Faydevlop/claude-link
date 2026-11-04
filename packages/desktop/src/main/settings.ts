@@ -1,7 +1,8 @@
 import { app } from 'electron';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { DesktopSettings } from '../../../shared/src/desktop.ts';
+import { writePrivateJson } from '../../../cli/src/config.ts';
 
 // Stored in the same shape as the CLI's config.json, so the bundled MCP server can read it via CLAUDE_LINK_HOME.
 export const dataDir = () => app.getPath('userData');
@@ -23,8 +24,9 @@ export function loadSettings(): DesktopSettings | null {
 }
 
 export function saveSettings(s: DesktopSettings) {
-  mkdirSync(dataDir(), { recursive: true });
-  writeFileSync(file(), JSON.stringify(s, null, 2) + '\n', { mode: 0o600 });
+  mkdirSync(dataDir(), { recursive: true, mode: 0o700 });
+  // Holds the team token: owner-only, written atomically.
+  writePrivateJson(file(), s);
   current = s;
 }
 

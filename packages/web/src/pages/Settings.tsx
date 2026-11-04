@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { api } from '../api.ts';
 import { desktop, type DesktopState } from '../desktop.ts';
-import { Button, Card, Copyable, cx } from '../ui.tsx';
+import { Button, Card, Copyable, cx, inputCls } from '../ui.tsx';
 import ProjectsPicker, { type ProjectSelection } from '../ProjectsPicker.tsx';
 
 function Row({ title, detail, children }: { title: string; detail?: ReactNode; children: ReactNode }) {
@@ -15,9 +16,9 @@ function Row({ title, detail, children }: { title: string; detail?: ReactNode; c
   );
 }
 
-function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+function Toggle({ on, onChange, disabled, label }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean; label: string }) {
   return (
-    <button role="switch" aria-checked={on} disabled={disabled} onClick={() => onChange(!on)}
+    <button role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)}
       className={cx('relative h-6 w-11 shrink-0 rounded-full transition disabled:opacity-50', on ? 'bg-brand' : 'bg-stone-300 dark:bg-stone-700')}>
       <span className={cx('absolute top-0.5 size-5 rounded-full bg-white shadow transition-all', on ? 'left-[22px]' : 'left-0.5')} />
     </button>
@@ -42,10 +43,23 @@ export default function Settings({ state, onState }: { state: DesktopState; onSt
 
   const teamAddress = s.role === 'lead' && state.hub.addresses[0] ? `${state.hub.addresses[0]}:${s.port ?? 4545}` : s.hubUrl.replace(/^https?:\/\//, '');
 
+  // Lead only: how long an unused token keeps working.
+  const [idleDays, setIdleDays] = useState<number | null>(null);
+  useEffect(() => {
+    if (s.role !== 'lead') return;
+    api<{ tokenIdleDays: number }>('GET', '/api/team').then(t => setIdleDays(t.tokenIdleDays)).catch(() => {});
+  }, [s.role]);
+  const saveIdleDays = async (days: number) => {
+    setError('');
+    try { setIdleDays((await api<{ tokenIdleDays: number }>('PATCH', '/api/team', { tokenIdleDays: days })).tokenIdleDays); }
+    catch (e) { setError((e as Error).message); }
+  };
+  const extraFixTools = s.fixAllowedTools ?? [];
+
   return (
     <div className="mx-auto max-w-3xl p-4 md:p-6">
       <h1 className="mb-4 text-xl font-semibold">Settings</h1>
-      {error && <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">{error}</div>}
+      {error && <div role="alert" className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">{error}</div>}
 
       <Card className="mb-4 py-0">
         <Row title="Team" detail={<>{s.teamName} · you are <b>{s.name}</b> ({s.role === 'lead' ? 'team lead' : 'member'})</>}>
@@ -75,18 +89,45 @@ export default function Settings({ state, onState }: { state: DesktopState; onSt
       </Card>
 
       <Card className="mb-4 py-0">
-        <Row title="Answer teammates' questions automatically" detail="Read-only. When off, you approve each question in a dialog.">
-          <Toggle on={s.autoApproveReads} disabled={busy} onChange={v => update({ autoApproveReads: v })} />
+        <Row title="Connection to the team"
+          detail={state.security.encrypted
+            ? <>Encrypted (TLS). This computer only talks to the team server whose certificate it saw when it joined. Compare this fingerprint with the one in your lead's Settings:</>
+            : <span className="text-amber-700 dark:text-amber-400">Not encrypted. The team server is an older version, or was started without encryption. Use it only on a network you trust.</span>}>
+          <span className={cx('rounded-full px-2 py-0.5 text-xs', state.security.encrypted ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300')}>
+            {state.security.encrypted ? '🔒 Encrypted' : 'Not encrypted'}
+          </span>
         </Row>
-        <Row title="Code changes need your approval" detail="Always on. Fixes run on a separate branch only after you approve.">
-          <Toggle on disabled onChange={() => {}} />
+        {state.security.fingerprint && <div className="border-b border-stone-100 pb-4 dark:border-stone-800"><Copyable text={state.security.fingerprint} /></div>}
+        <Row title="What teammates' questions can do" detail="Your Claude reads your projects and their git history. It cannot change files, run commands, use the web, or read secrets such as .env files, SSH keys or your Claude Link token.">
+          <span className="text-xs text-stone-500">Read-only</span>
+        </Row>
+        <Row title="What an approved fix can do"
+          detail={<>Your Claude edits separate copies of your projects and commits to a new branch. It cannot touch your own checkout, git settings or secrets, and nothing is merged or pushed.{' '}
+            {extraFixTools.length ? <>It may also run: <code>{extraFixTools.join(', ')}</code> (from your config file).</> : 'It cannot run commands.'}</>}>
+          <span className="text-xs text-stone-500">Needs your approval</span>
+        </Row>
+        {s.role === 'lead' && idleDays !== null && (
+          <Row title="Unused tokens expire" detail="A teammate's token that has not been used for this long stops working (for example a lost laptop). Your own token is exempt.">
+            <select aria-label="Token expiry" className={inputCls + ' w-36'} value={idleDays} onChange={e => void saveIdleDays(Number(e.target.value))}>
+              {[[7, 'After 7 days'], [14, 'After 14 days'], [30, 'After 30 days'], [90, 'After 90 days'], [0, 'Never']].map(([d, l]) => <option key={d} value={d}>{l}</option>)}
+            </select>
+          </Row>
+        )}
+      </Card>
+
+      <Card className="mb-4 py-0">
+        <Row title="Answer teammates' questions automatically" detail="Read-only. When off, you approve each question in a dialog.">
+          <Toggle label="Answer questions automatically" on={s.autoApproveReads} disabled={busy} onChange={v => update({ autoApproveReads: v })} />
+        </Row>
+        <Row title="Code changes need your approval" detail="Always on. Fixes run on a separate branch only after you approve them on this computer.">
+          <Toggle label="Code changes need approval" on disabled onChange={() => {}} />
         </Row>
         <Row title="Start when I log in" detail="Keeps you reachable by your team.">
-          <Toggle on={s.launchAtLogin} disabled={busy} onChange={v => update({ launchAtLogin: v })} />
+          <Toggle label="Start when I log in" on={s.launchAtLogin} disabled={busy} onChange={v => update({ launchAtLogin: v })} />
         </Row>
         <Row title="Use Claude Link in VS Code / terminal Claude Code"
           detail="Adds the team tools (ask a teammate's Claude, report status…) to your regular Claude Code too. Off by default so your editor setup is untouched.">
-          <Toggle on={s.claudeCodeIntegration} disabled={busy} onChange={v => update({ claudeCodeIntegration: v })} />
+          <Toggle label="Use Claude Link in other Claude Code sessions" on={s.claudeCodeIntegration} disabled={busy} onChange={v => update({ claudeCodeIntegration: v })} />
         </Row>
         <Row title="Notifications" detail="Check that alerts reach you.">
           <Button onClick={() => bridge.testNotification()}>Send test</Button>

@@ -52,19 +52,36 @@ export function StoreProvider({ me, children }: { me: Member; children: ReactNod
   }, []);
 
   useEffect(() => {
-    void refresh();
-    let ws: WebSocket;
+    void refresh().catch(() => {});
+    let ws: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout>;
     let closed = false;
-    const connect = () => {
-      ws = new WebSocket(hubWsUrl(`/ws?client=web&token=${encodeURIComponent(getToken() ?? '')}`));
-      ws.onopen = () => { setState(s => ({ ...s, connected: true })); void refresh(); };
+    let delay = 1000;
+    // A single-use ticket keeps the token out of the WebSocket URL. Older hubs without tickets get the token.
+    const socketUrl = async () => {
+      try {
+        const { ticket } = await api<{ ticket: string }>('POST', '/api/ws-ticket');
+        return hubWsUrl(`/ws?client=web&ticket=${encodeURIComponent(ticket)}`);
+      } catch (e) {
+        if (!/not found/i.test((e as Error).message)) throw e;
+        return hubWsUrl(`/ws?client=web&token=${encodeURIComponent(getToken() ?? '')}`);
+      }
+    };
+    const connect = async () => {
+      let url: string;
+      try { url = await socketUrl(); }
+      catch { if (!closed) retry = setTimeout(() => void connect(), delay = Math.min(delay * 2, 30_000)); return; }
+      if (closed) return;
+      ws = new WebSocket(url);
+      ws.onopen = () => { delay = 1000; setState(s => ({ ...s, connected: true })); void refresh().catch(() => {}); };
       ws.onclose = () => {
         setState(s => ({ ...s, connected: false }));
-        if (!closed) retry = setTimeout(connect, 2000);
+        if (!closed) retry = setTimeout(() => void connect(), delay = Math.min(delay * 2, 30_000));
       };
       ws.onmessage = e => {
-        const ev = JSON.parse(e.data) as HubEvent;
+        let ev: HubEvent;
+        try { ev = JSON.parse(e.data) as HubEvent; } catch { return; }
+        if (!ev || typeof ev !== 'object' || typeof ev.type !== 'string') return;
         setState(s => {
           switch (ev.type) {
             case 'member.updated': return { ...s, members: upsert(s.members, ev.member), me: ev.member.id === s.me.id ? ev.member : s.me };
@@ -84,8 +101,8 @@ export function StoreProvider({ me, children }: { me: Member; children: ReactNod
         });
       };
     };
-    connect();
-    return () => { closed = true; clearTimeout(retry); ws.close(); };
+    void connect();
+    return () => { closed = true; clearTimeout(retry); ws?.close(); };
   }, [refresh]);
 
   const markRead = useCallback((threadId: number) => {

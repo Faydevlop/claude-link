@@ -4,6 +4,8 @@ import { Agent } from '../../../cli/src/agent/core.ts';
 import type { Config } from '../../../cli/src/config.ts';
 import type { DesktopSettings } from '../../../shared/src/desktop.ts';
 import { loadSettings } from './settings.ts';
+import { projectsOf } from '../../../cli/src/projects.ts';
+import { sanitizeAllowRules } from '../../../cli/src/agent/policy.ts';
 
 const MAX_LOG = 300;
 
@@ -40,15 +42,37 @@ export function notify(title: string, body: string, hooks: Hooks, tab?: string) 
 }
 
 const toConfig = (s: DesktopSettings): Config => ({
-  hubUrl: s.hubUrl, token: s.token, memberId: s.memberId, name: s.name, repoPath: s.repoPath,
+  hubUrl: s.hubUrl, token: s.token, hubCert: s.hubCert ?? null, memberId: s.memberId, name: s.name, repoPath: s.repoPath,
   projects: s.projects, workspaceRoot: s.workspaceRoot,
   claudeBin: s.claudeBin, taskTimeoutMinutes: s.taskTimeoutMinutes, fixAllowedTools: s.fixAllowedTools,
 });
+
+/** What an approved fix may do on this computer, in words, for approval dialogs. */
+export function describeFixBoundary(s: DesktopSettings): string {
+  const projects = projectsOf(s).map(p => p.name);
+  const extra = sanitizeAllowRules(s.fixAllowedTools);
+  return `Runs in separate working copies of: ${projects.join(', ') || '(no projects)'}. ` +
+    `Claude may read and edit files there only${extra.length ? ` and run: ${extra.join(', ')}` : ', and cannot run commands'}. ` +
+    'The result is a commit on a new claude-link/task-* branch. Nothing is merged or pushed.';
+}
 
 export function startAgent(settings: DesktopSettings, hooks: Hooks) {
   stopAgent();
   agentState.revoked = null;
   const a = new Agent(toConfig(settings), {
+    // A fix approved somewhere else (e.g. in a browser) is confirmed here before it runs.
+    confirmFix: async (task, requester, reason) => {
+      const w = hooks.window();
+      w?.show();
+      const opts = {
+        type: 'warning' as const, buttons: ['Run fix', 'Refuse'], defaultId: 1, cancelId: 1,
+        title: 'Confirm code change',
+        message: `${requester.name}'s Claude wants to change your code (fix #${task.id})`,
+        detail: `${reason}\n\n"${task.title}"\n\n${task.prompt.slice(0, 1500)}\n\n${describeFixBoundary(loadSettings() ?? settings)}`,
+      };
+      const { response } = w ? await dialog.showMessageBox(w, opts) : await dialog.showMessageBox(opts);
+      return response === 0;
+    },
     device: { name: hostname(), os: process.platform, appVersion: app.getVersion() },
     beforeRun: async (task, requester) => {
       if (loadSettings()?.autoApproveReads !== false) return true;
@@ -101,6 +125,12 @@ export function startAgent(settings: DesktopSettings, hooks: Hooks) {
     if ((e as { status?: number }).status === 401) agentState.revoked = 'invalid token';
     hooks.changed();
   });
+}
+
+/** Approve or reject a fix aimed at this computer; the approval is recorded here, bound to the exact request. */
+export async function decideTask(taskId: number, approve: boolean) {
+  if (!agent) throw new Error('Not connected to the team yet.');
+  await agent.decide(taskId, approve);
 }
 
 export function stopAgent() {

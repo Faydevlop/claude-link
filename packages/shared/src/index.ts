@@ -3,6 +3,14 @@ import { z } from 'zod';
 export const ROLES = ['lead', 'qa', 'frontend', 'backend', 'ai', 'other'] as const;
 export type Role = (typeof ROLES)[number];
 
+/**
+ * What a member may do on the team. The lead is always `admin`.
+ * - developer: chat, ask questions, send fix requests, receive tasks.
+ * - viewer: chat and ask read-only questions; cannot send fix requests.
+ */
+export const ACCESS_LEVELS = ['admin', 'developer', 'viewer'] as const;
+export type Access = (typeof ACCESS_LEVELS)[number];
+
 export const WORK_STATES = ['idle', 'working', 'blocked', 'done'] as const;
 export type WorkState = (typeof WORK_STATES)[number];
 
@@ -48,6 +56,7 @@ export interface Member {
   name: string;
   role: Role;
   isLead: boolean;
+  access: Access;
   online: boolean;
   lastSeen: string | null;
   repoPath: string | null;
@@ -68,6 +77,8 @@ export interface JoinRequest {
   ip: string;
   status: JoinRequestStatus;
   memberId: number | null;
+  /** Short code shown on both the requester's and the lead's screen; they must match. */
+  verificationCode: string | null;
   createdAt: string;
 }
 
@@ -113,6 +124,10 @@ export interface Task {
   diff: string | null;
   branch: string | null;
   threadId: number | null;
+  /** Fix tasks: who approved, when, and a hash of the exact request they approved. */
+  approvedBy: number | null;
+  approvedAt: string | null;
+  approvalHash: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -139,16 +154,47 @@ export type HubEvent =
   // Sent to the target agent only: execute this task now.
   | { type: 'task.run'; task: Task; requester: Pick<Member, 'id' | 'name' | 'role'>; resumeSessionId: string | null };
 
+const taskShape = z.object({
+  id: z.number().int().positive(), fromId: z.number().int(), toId: z.number().int(),
+  mode: z.enum(TASK_MODES), status: z.enum(TASK_STATUSES),
+  title: z.string().max(400), prompt: z.string().max(20000),
+  result: z.string().nullable(), diff: z.string().nullable(), branch: z.string().nullable(), threadId: z.number().int().nullable(),
+  approvedBy: z.number().int().nullable().optional(), approvedAt: z.string().nullable().optional(), approvalHash: z.string().nullable().optional(),
+  createdAt: z.string(), updatedAt: z.string(),
+});
+
+/**
+ * The only hub events an agent acts on. Agents validate them before doing anything: a hub (or anything
+ * pretending to be one) is treated as untrusted input.
+ */
+export const agentEventSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('task.run'),
+    task: taskShape,
+    requester: z.object({ id: z.number().int(), name: z.string().max(60), role: z.enum(ROLES) }),
+    resumeSessionId: z.string().max(200).regex(/^[\w-]+$/).nullable(),
+  }),
+  z.object({ type: z.literal('task.updated'), task: taskShape }),
+]);
+
 // ---- Request bodies ----
 
 export const createMemberBody = z.object({
   name: z.string().trim().min(1).max(60),
-  role: z.enum(ROLES),
+  role: z.enum(ROLES).refine(r => r !== 'lead', 'there is only one team lead'),
+  access: z.enum(['developer', 'viewer']).optional(),
 });
 
 export const updateMemberBody = z.object({
   name: z.string().trim().min(1).max(60).optional(),
-  role: z.enum(ROLES).optional(),
+  role: z.enum(ROLES).refine(r => r !== 'lead', 'there is only one team lead').optional(),
+  access: z.enum(['developer', 'viewer']).optional(),
+});
+
+export const teamSettingsBody = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  /** Tokens unused for this many days stop working (0 = never). The lead's own token is exempt. */
+  tokenIdleDays: z.number().int().min(0).max(3650).optional(),
 });
 
 export const statusBody = z.object({
@@ -159,8 +205,8 @@ export const statusBody = z.object({
 
 const repoStateShape = {
   branch: z.string().max(300),
-  dirtyFiles: z.array(z.string()).max(500),
-  recentCommits: z.array(z.object({ hash: z.string(), subject: z.string(), at: z.string() })).max(20),
+  dirtyFiles: z.array(z.string().max(1000)).max(500),
+  recentCommits: z.array(z.object({ hash: z.string().max(64), subject: z.string().max(500), at: z.string().max(40) })).max(20),
 };
 
 export const gitStateBody = z.object({
@@ -195,6 +241,11 @@ export const taskCompleteBody = z.object({
   diff: z.string().max(400000).optional(),
   branch: z.string().max(300).optional(),
   sessionId: z.string().max(200).optional(),
+});
+
+export const claimTaskBody = z.object({
+  /** Fix tasks: the agent's own hash of what its owner approved; must match the hub's record. */
+  approvalHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 });
 
 export const joinRequestBody = z.object({

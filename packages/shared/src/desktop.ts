@@ -6,6 +6,8 @@ export interface DesktopSettings {
   role: 'lead' | 'member';
   hubUrl: string;
   token: string;
+  /** PEM of the hub's TLS certificate, pinned when this computer joined (https hubs). */
+  hubCert?: string | null;
   memberId: number;
   name: string;
   /** First project; kept in sync with `projects` for older readers. */
@@ -30,6 +32,8 @@ export interface DesktopState {
   settings: DesktopSettings | null;
   agent: { connected: boolean; revoked: string | null };
   hub: { running: boolean; error: string | null; addresses: string[] };
+  /** How this computer talks to the team server. */
+  security: { encrypted: boolean; fingerprint: string | null };
   log: string[];
 }
 
@@ -38,6 +42,9 @@ export interface DiscoveredTeam {
   lead: string | null;
   url: string;
   version: string;
+  encrypted: boolean;
+  /** SHA-256 of the certificate this computer saw (https hubs). */
+  fingerprint: string | null;
 }
 
 export interface Prerequisites {
@@ -75,7 +82,8 @@ export interface DesktopBridge {
   discoverTeams(): Promise<DiscoveredTeam[]>;
   probeHub(url: string): Promise<DiscoveredTeam>;
   createTeam(input: { name: string; teamName: string; port: number }): Promise<DesktopState>;
-  requestJoin(input: { hubUrl: string; name: string; role: Role }): Promise<{ requestId: number }>;
+  /** `verificationCode` must match the code on the lead's screen before they approve. */
+  requestJoin(input: { hubUrl: string; name: string; role: Role }): Promise<{ requestId: number; verificationCode: string }>;
   pollJoin(): Promise<{ status: 'pending' | 'approved' | 'rejected' | 'claimed' | 'none'; member?: Member }>;
   joinWithToken(input: { hubUrl: string; token: string }): Promise<DesktopState>;
   /** Opens a folder picker; `repos` lists the git repositories found at or inside the folder. */
@@ -85,6 +93,8 @@ export interface DesktopBridge {
   testNotification(): Promise<void>;
   leaveTeam(): Promise<DesktopState>;
   openExternal(url: string): Promise<void>;
+  /** Approve or reject a fix aimed at this computer. Recorded here first, then sent to the team server. */
+  decideTask(taskId: number, approve: boolean): Promise<void>;
 
   myClaude: {
     list(): Promise<MyClaudeSession[]>;

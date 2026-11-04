@@ -9,6 +9,7 @@ function AssignForm({ onDone }: { onDone: () => void }) {
   const [toId, setToId] = useState(others[0]?.id ?? 0);
   const [title, setTitle] = useState('');
   const [details, setDetails] = useState('');
+  const [error, setError] = useState('');
   return (
     <Card className="mb-4 space-y-3">
       <div className="font-medium">Assign a task</div>
@@ -19,11 +20,13 @@ function AssignForm({ onDone }: { onDone: () => void }) {
         <input className={inputCls} placeholder="Title" value={title} onChange={e => setTitle(e.target.value)} />
       </div>
       <textarea className={inputCls} rows={3} placeholder="Details / acceptance criteria" value={details} onChange={e => setDetails(e.target.value)} />
+      {error && <div role="alert" className="text-sm text-red-600">{error}</div>}
       <div className="flex justify-end gap-2">
         <Button onClick={onDone}>Cancel</Button>
         <Button kind="primary" disabled={!title.trim() || !details.trim()} onClick={async () => {
+          setError('');
           try { await api('POST', '/api/tasks', { toId, mode: 'assignment', title, prompt: details }); onDone(); }
-          catch (e) { alert((e as Error).message); }
+          catch (e) { setError((e as Error).message); }
         }}>Assign</Button>
       </div>
     </Card>
@@ -35,7 +38,7 @@ function Row({ t }: { t: Task }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="border-b border-stone-100 last:border-0 dark:border-stone-800">
-      <button className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-left text-sm hover:bg-stone-50 dark:hover:bg-stone-800/50" onClick={() => setOpen(o => !o)}>
+      <button aria-expanded={open} className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-left text-sm hover:bg-stone-50 dark:hover:bg-stone-800/50" onClick={() => setOpen(o => !o)}>
         <span className="w-10 text-stone-400">#{t.id}</span>
         <ModeTag mode={t.mode} />
         <span className="min-w-0 flex-1 truncate font-medium">{t.title}</span>
@@ -47,7 +50,10 @@ function Row({ t }: { t: Task }) {
         <div className="space-y-3 px-3 pb-4 pl-16 text-sm">
           <div><div className="text-xs font-semibold uppercase text-stone-500">Request</div><p className="whitespace-pre-wrap">{t.prompt}</p></div>
           {t.result && <div><div className="text-xs font-semibold uppercase text-stone-500">{t.status === 'running' ? 'Progress' : 'Result'}</div><p className="whitespace-pre-wrap">{t.result}</p></div>}
-          {t.branch && <div className="text-xs">Branch: <code className="rounded bg-stone-100 px-1 dark:bg-stone-800">{t.branch}</code> — merge with <code className="rounded bg-stone-100 px-1 dark:bg-stone-800">git merge {t.branch}</code></div>}
+          {t.mode === 'fix' && t.approvedBy && (
+            <div className="text-xs text-stone-500">Approved by {memberName(t.approvedBy)}{t.approvedAt ? ` · ${new Date(t.approvedAt).toLocaleString()}` : ''}{t.approvalHash ? ` · request fingerprint ${t.approvalHash.slice(0, 12)}` : ''}</div>
+          )}
+          {t.branch && <div className="text-xs">Branch: <code className="rounded bg-stone-100 px-1 dark:bg-stone-800">{t.branch}</code> — review with <code className="rounded bg-stone-100 px-1 dark:bg-stone-800">git diff HEAD...{t.branch}</code>, then merge it yourself if you want it. Nothing was merged or pushed automatically.</div>}
           {t.diff && <Diff diff={t.diff} />}
         </div>
       )}

@@ -63,20 +63,22 @@ Claude Link is only a **messenger between Claudes** on your office network. It p
 
 **It is not a remote-access tool.**
 - Nobody can control your computer or open a shell on it through Claude Link.
-- Questions from teammates are read-only: their Claude can read your project but not change it.
-- **My Claude** is read-only too.
-- A *fix* request does nothing until **you**, the owner of that computer, approve it. Even then it only works on a separate git branch, never touches your current work, and never pushes anything. Not even the lead can approve a fix on your computer.
+- Questions from teammates are read-only: their Claude can read and search the projects you share, and their git history, but cannot change files, run commands, use the web, or read secrets such as `.env` files, SSH keys, cloud credentials or your Claude Link token. Your own Claude Code settings do not widen this.
+- **My Claude** is read-only too, whatever your Claude Code settings allow.
+- A *fix* request does nothing until **you**, the owner of that computer, approve it **on your computer**. Even then it only edits separate copies of your projects on a new git branch, never touches your current work, and never merges or pushes anything. Not even the lead can approve a fix on your computer.
 - Only the project folders you choose are shared. Your other files are not.
 
 **Network.**
+- All traffic is encrypted (TLS). Each computer remembers the team server's certificate when it joins and refuses any other, so someone else on the Wi-Fi cannot read or fake it.
 - Only the lead's computer accepts connections, on port 4545. Teammates' apps open no ports; they only connect out to the lead.
-- The team server is reachable from the office network only. It is not reachable from the internet unless someone deliberately sets up the office router to forward that port.
-- Joining needs the lead's approval. Every request carries a secret token, stored hashed, and the lead can remove a computer at any time.
-- Every action is recorded in the **Audit** tab.
+- The team server is reachable from the office network only. It is not reachable from the internet unless someone deliberately sets up the office router to forward that port. Don't.
+- Joining needs the lead's approval, checked with a code shown on both screens. Every request carries a secret token, stored hashed. The lead can remove a computer or issue a new token at any time, and tokens that go unused for 30 days stop working.
+- Every join, request, approval and result is recorded in the **Audit** tab.
 
 **Limits to be aware of.**
-- Traffic on the Wi-Fi is plain HTTP, not encrypted. Use Claude Link on a trusted office network, not on public Wi-Fi.
 - Code that Claude Code reads is sent to Anthropic as part of normal Claude Code use. Follow your company's rules for Claude Code as usual.
+- Teammates can ask about anything in the projects you share. Keep secrets out of your repositories.
+- Claude Code runs as your user; the limits above come from Claude Code's permission system, not from an operating-system sandbox. See [SECURITY.md](SECURITY.md) for the full security model and remaining risks.
 - The installers are not signed with a paid certificate yet. The warnings from macOS ("unidentified developer") and Windows SmartScreen ("unknown publisher") are about the missing certificate, not about anything the app does. The full source code is in this repository.
 
 
@@ -106,13 +108,13 @@ The app checks for Claude Code and Git during setup.
 3. Choose your projects: **One project**, or **Several projects** if your repositories (e.g. frontend, backend) live in one folder. Pick that folder and every git repository inside is listed; untick any you don't want, or add projects from elsewhere.
 4. Set your permissions, then click **Finish setup**.
 5. Keep the app open while the team works. Closing the window keeps it running in the menu bar (Mac) or system tray (Windows).
-6. When a teammate asks to join, you get a notification. Open **Members** and click **Approve**.
+6. When a teammate asks to join, you get a notification. Open **Members**, check that the code matches the one on their screen, choose their access (Developer, or Viewer for questions only) and click **Approve**.
 
 ### Teammates
 1. Open Claude Link and choose **Join a team**.
 2. Pick your team from the list. If it doesn't show up, type the address shown in the lead's **Settings → Team address**.
 3. Enter your name and role, then click **Send join request**.
-4. Wait for the lead to approve. The app continues by itself once they do.
+4. Tell the lead the **verification code** on your screen. They approve only if it matches the code next to your request. The app continues by itself once they do.
 5. Choose your projects (**One project** or **Several projects**, as above), set your permissions, then click **Finish setup**.
 
 Alternatively, the lead can add you under **Members → Add member** and send you an address and token. Use **Join a team → I have a token**.
@@ -121,7 +123,7 @@ Alternatively, the lead can add you under **Members → Add member** and send yo
 - **Chat:** `#team`, direct messages, and every Claude-to-Claude conversation. Click **Ask a teammate's Claude** to send a question or a fix request.
 - **My Claude:** chat with your own Claude Code. It works on your project and can also message teammates' Claudes, for example "ask the backend Claude what `/orders` returns" or "report status: login page done".
   It is read-only: it can read your code but never changes files.
-- **Approvals:** when someone's Claude wants to change your code, you get a notification and a yellow **Approve / Reject** banner.
+- **Approvals:** when someone's Claude wants to change your code, you get a notification and a yellow banner with the exact request and what approving allows. Click **Approve and run** or **Reject**. After the fix runs, review its diff in **Requests** and merge the branch yourself if you want it.
 - **Several projects:**
   - Questions can read all of them.
   - A fix gets a separate working copy of each project on the same `claude-link/task-N` branch. The branch is kept only in the projects that actually changed.
@@ -207,26 +209,27 @@ npm install && npm run build      # build the web dashboard
 cd packages/cli && npm link && cd ../..   # puts `claude-link` on your PATH
 claude-link hub --name "Your Name"
 ```
-The hub prints a **Network URL** (for example `http://192.168.1.77:4545`) and your **lead token**. The token is shown only once. If you lose it, restart with `--rotate-lead-token`.
+The hub prints a **Network URL** (for example `https://192.168.1.77:4545`), its **certificate fingerprint** and your **lead token**. The token is shown only once. If you lose it, restart with `--rotate-lead-token`.
 The first time it runs, macOS asks whether Node may accept incoming connections. Click **Allow**.
 
-Open the URL, sign in with the lead token, and add teammates under **Members → Add member**. Each new member gets their own token and a join command to copy.
+Open the URL, sign in with the lead token, and add teammates under **Members → Add member**. Each new member gets their own token. The browser warns that the certificate is self-signed: check that the fingerprint matches what the hub printed before you continue.
 
 Connect your own Claude Code as well:
 ```bash
-claude-link join http://127.0.0.1:4545 --token <lead-token> --repo ~/work/project
+claude-link join 127.0.0.1:4545 --token <lead-token> --repo ~/work/project
 claude-link agent
 ```
 
 ### 2. Each teammate
 ```bash
 # same install steps (clone, npm install, cd packages/cli && npm link), then:
-claude-link join http://<lead-ip>:4545 --token <their-token> --repo ~/work/project [--hooks]
+claude-link join <lead-ip>:4545 --token <their-token> --repo ~/work/project [--hooks]
 # several projects: --workspace ~/work   (adds every git repository inside)
 #               or: --repo ~/work/frontend ~/work/backend
+# non-interactive:  --fingerprint <sha256 printed by the hub>
 claude-link agent          # keep this running while you work
 ```
-`join` checks the token, saves `~/.claude-link/config.json`, and registers the `claude-link` MCP server with Claude Code at user scope. The optional `--hooks` flag also adds a Claude Code hook that reports each commit to the lead's status board.
+`join` shows the hub's certificate fingerprint and asks you to confirm it matches the one the lead's hub printed, then checks the token, saves `~/.claude-link/config.json` (with the pinned certificate), and registers the `claude-link` MCP server with Claude Code at user scope. The optional `--hooks` flag also adds a Claude Code hook that reports each commit to the lead's status board.
 
 ## Using it from Claude Code
 Restart Claude Code after joining, then ask in plain language:
@@ -249,31 +252,38 @@ Restart Claude Code after joining, then ask in plain language:
 | `send_message`, `read_inbox`, `list_threads`, `read_thread` | Team chat |
 
 ## Safety model
-- **Read requests** run with read-only tools only: `Read`, `Grep`, `Glob`, and `git status/log/diff/show`.
-- **Fix requests** do nothing until the target machine's owner approves them, either in the agent terminal (`y/N`) or with the web banner. After approval:
-  - the work runs in a separate **git worktree** on the branch `claude-link/task-<id>`, so your checkout and uncommitted work stay untouched;
-  - the result is committed to that branch and **never pushed**;
+Summary below; the full model, threat analysis and remaining risks are in [SECURITY.md](SECURITY.md).
+
+- **Read requests** run Claude Code with only `Read`, `Grep` and `Glob` on your shared projects, plus a read-only git tool (status, log, diff, show, blame). No shell, no edits, no web, no other MCP servers, and your own Claude Code settings are ignored (`--restricted`). Secrets (`.env`, keys, `~/.ssh`, cloud credentials, Claude credentials, your Claude Link token) are denied, and credentials are removed from the environment.
+- **Fix requests** do nothing until the target machine's owner approves them **on that machine**, in the agent terminal (`y/N`) or the app. The approval is bound to the exact request; if it changes, it must be approved again. After approval:
+  - the work runs in a separate **git worktree** on the branch `claude-link/task-<id>`, so your checkout and uncommitted work stay untouched; Claude can edit only there;
+  - the result is committed to that branch (without running repository hooks) and **never merged or pushed**;
   - you review it with `git diff HEAD...claude-link/task-<id>` and merge it yourself.
-- Not even the lead can approve a fix on someone else's machine.
+- Not even the lead can approve a fix on someone else's machine. Viewers cannot request fixes.
 - Each request runs on the target person's own Claude Code login.
-- Tokens are stored hashed. Every API call needs a token. The lead can rotate or revoke any token.
-- Traffic uses plain HTTP inside the LAN. Use it only on a trusted office network.
+- Traffic is TLS-encrypted with a pinned certificate. Tokens are stored hashed; every API call needs one; the lead can rotate or revoke any token, which disconnects that computer at once.
 
 Optional settings in `~/.claude-link/config.json`:
-- `taskTimeoutMinutes` (default 15);
-- `fixAllowedTools`, for example `["Bash(npm test:*)"]`, to let fixes run your tests;
-- `claudeBin`, a path to the `claude` executable.
+- `taskTimeoutMinutes` (default 15, at most 120);
+- `fixAllowedTools`, for example `["Bash(npm test:*)"]`, to let fixes run specific commands such as your tests. Only `Bash(<command>)` entries are accepted. These commands run code from the repository with your user's rights, outside Claude Code's file restrictions;
+- `claudeBin`, a path to the `claude` executable;
+- `trustHubApprovals` (default `false`): run fixes approved in the hub's web page without asking again in the terminal. Leave it off unless the agent cannot be interactive.
+
+The hub runs HTTPS by default. `claude-link hub --insecure-http` serves plain HTTP for networks where that is unavoidable; everything then travels unencrypted.
 
 ## Development
 ```bash
-npm test            # hub API tests (vitest)
-npm run typecheck
-npm run dev:web     # Vite dev server on :5173, proxied to a hub on :4545
+npm test            # unit, integration and end-to-end tests (vitest); no Claude API calls
+npm run typecheck   # CLI, hub, shared
+npx tsc -p packages/desktop/tsconfig.json --noEmit
+npx tsc -p packages/web/tsconfig.json
+npm run dev:web     # Vite dev server on :5173, proxied to a local hub on :4545
 ```
+CI (`.github/workflows/ci.yml`) runs all of these on Linux, macOS and Windows. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit together and [docs/AUDIT-REPORT.md](docs/AUDIT-REPORT.md) for the latest security audit.
 Code layout:
 - `packages/shared` holds the protocol types and schemas.
-- `packages/hub` is the Fastify server and SQLite store.
-- `packages/cli` contains the `hub`, `join`, `agent`, `mcp` and `hook` commands.
+- `packages/hub` is the Fastify server, SQLite store and TLS identity.
+- `packages/cli` contains the `hub`, `join`, `agent`, `mcp`, `git-mcp` and `hook` commands, and the execution policy (`src/agent/policy.ts`).
 - `packages/web` is the React dashboard.
 - `packages/desktop` is the Electron app. It hosts the hub (lead), runs the agent and My Claude, and reuses the web UI.
 

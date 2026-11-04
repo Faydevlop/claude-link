@@ -75,6 +75,7 @@ function Shell({ desktopState, onDesktopState, onLogout }: { desktopState?: Desk
   }[tab];
 
   const live = desktopState ? desktopState.agent.connected && connected : connected;
+  const encrypted = desktopState ? desktopState.security.encrypted : location.protocol === 'https:';
 
   return (
     <div className="flex h-full flex-col">
@@ -83,7 +84,7 @@ function Shell({ desktopState, onDesktopState, onLogout }: { desktopState?: Desk
         {tabs.length > 1 && (
           <nav className="flex gap-1 overflow-x-auto">
             {tabs.map(t => (
-              <a key={t} href={`#${t}`} className={cx('relative rounded-lg px-3 py-1.5 text-sm whitespace-nowrap', tab === t ? 'bg-stone-100 font-medium dark:bg-stone-800' : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100')}>
+              <a key={t} href={`#${t}`} aria-current={tab === t ? 'page' : undefined} className={cx('relative rounded-lg px-3 py-1.5 text-sm whitespace-nowrap', tab === t ? 'bg-stone-100 font-medium dark:bg-stone-800' : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100')}>
                 {LABEL[t]}
                 {!!badge[t] && <span className="ml-1.5 rounded-full bg-brand px-1.5 text-xs text-white">{badge[t]}</span>}
               </a>
@@ -91,7 +92,9 @@ function Shell({ desktopState, onDesktopState, onLogout }: { desktopState?: Desk
           </nav>
         )}
         <div className="ml-auto flex items-center gap-3 text-sm">
-          <span className={cx('flex items-center gap-1.5 text-xs', live ? 'text-emerald-600' : 'text-amber-600')}>
+          <span className={cx('text-xs', encrypted ? 'text-stone-500' : 'text-amber-600')}
+            title={encrypted ? 'Traffic to the team server is encrypted' : 'Traffic to the team server is NOT encrypted'}>{encrypted ? '🔒' : '⚠ Unencrypted'}</span>
+          <span role="status" className={cx('flex items-center gap-1.5 text-xs', live ? 'text-emerald-600' : 'text-amber-600')}>
             <span className={cx('size-1.5 rounded-full', live ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse')} />{live ? 'Live' : 'Reconnecting'}
           </span>
           <span className="max-sm:hidden"><b>{me.name}</b> <span className="text-stone-500">· {ROLE_LABEL[me.role]}</span></span>
