@@ -11,12 +11,48 @@ Claude Link connects your team's Claude Code sessions over the office network. W
 
 The lead's app shows Status, Chat, My Claude, Tasks, Members, Audit and Settings. Everyone else sees Chat, My Claude, Requests and Settings.
 
-```
- Lead's computer (Claude Link app)              Teammate's computer (Claude Link app)
-   team server: chat, tasks, status   ◄─ Wi-Fi ─►  agent: answers questions, runs approved fixes
-   + its own agent and My Claude                     + My Claude
-              Each app uses that person's own Claude Code login to do the work.
-```
+## How it works
+
+![How Claude Link works](docs/how-it-works.png)
+
+The diagram source is [docs/how-it-works.drawio](docs/how-it-works.drawio); open it in [draw.io](https://www.drawio.com) to edit it.
+
+- The lead's app runs a small **team server** on the lead's computer. It keeps the chat history and team status in one file there (`hub.db`).
+- Every other app connects to that server over the office Wi-Fi. They find it automatically, and the lead approves each new computer.
+- When you ask a teammate's Claude something, the question goes to the team server, then to that teammate's app. Their own Claude Code reads their code and sends the answer back the same way.
+- The actual thinking is done by each person's own **Claude Code**, signed in with their own account, exactly as if they were using it in a terminal.
+
+## Offline and safe: what Claude Link is (and isn't)
+
+Claude Link is only a **messenger between Claudes** on your office network. It passes questions, answers and chat messages from one team member's computer to another. That is all it does.
+
+**Claude Link itself works fully offline.**
+- All of its traffic stays on the office Wi-Fi. It has no cloud server, no account system, no telemetry or analytics, and no auto-updater, and it never contacts any internet address.
+- The app's screens, fonts and styles are bundled inside it, so nothing is downloaded when it runs.
+- The only outside links are the "install Claude Code" and "install Git" help links on the setup screen. They open in your browser, and only if you click them.
+
+**The only internet traffic is Claude Code.**
+- Claude Code talks to Anthropic over HTTPS to run Claude, the same as when you use Claude Code on its own. That is the blue dashed line in the diagram.
+- Claude Link adds no extra data to that connection, and it never sends anything to Anthropic itself.
+
+**It is not a remote-access tool.**
+- Nobody can control your computer or open a shell on it through Claude Link.
+- Questions from teammates are read-only: their Claude can read your project but not change it.
+- **My Claude** is read-only too.
+- A *fix* request does nothing until **you**, the owner of that computer, approve it. Even then it only works on a separate git branch, never touches your current work, and never pushes anything. Not even the lead can approve a fix on your computer.
+- Only the project folders you choose are shared. Your other files are not.
+
+**Network.**
+- Only the lead's computer accepts connections, on port 4545. Teammates' apps open no ports; they only connect out to the lead.
+- The team server is reachable from the office network only. It is not reachable from the internet unless someone deliberately sets up the office router to forward that port.
+- Joining needs the lead's approval. Every request carries a secret token, stored hashed, and the lead can remove a computer at any time.
+- Every action is recorded in the **Audit** tab.
+
+**Limits to be aware of.**
+- Traffic on the Wi-Fi is plain HTTP, not encrypted. Use Claude Link on a trusted office network, not on public Wi-Fi.
+- Code that Claude Code reads is sent to Anthropic as part of normal Claude Code use. Follow your company's rules for Claude Code as usual.
+- The installers are not signed with a paid certificate yet. The warnings from macOS ("unidentified developer") and Windows SmartScreen ("unknown publisher") are about the missing certificate, not about anything the app does. The full source code is in this repository.
+
 
 ## Desktop app (recommended)
 
