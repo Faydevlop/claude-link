@@ -1,5 +1,6 @@
 {
   "name": "claude-link-monorepo",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "workspaces": [

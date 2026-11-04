@@ -278,3 +278,9 @@ Code layout:
 - `packages/desktop` is the Electron app. It hosts the hub (lead), runs the agent and My Claude, and reuses the web UI.
 
 Set `CLAUDE_LINK_HOME` to run several identities on one machine while testing.
+
+## License
+
+[MIT](LICENSE) © 2026 Fayis
+
+Claude Link is an independent project. It is not made by or affiliated with Anthropic. It uses each person's own [Claude Code](https://claude.com/claude-code) installation.
