@@ -4,3 +4,7 @@ dist/
 .claude-link-dev/
 out/
 release/
+
+# Kept locally, not published
+screenshots/
+docs/medium-post.md

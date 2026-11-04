@@ -11,32 +11,6 @@ Claude Link connects your team's Claude Code sessions over the office network. W
 
 The lead's app shows Status, Chat, My Claude, Tasks, Members, Audit and Settings. Everyone else sees Chat, My Claude, Requests and Settings.
 
-## Screenshots
-
-![Team status with notes](screenshots/annotated/01-status.png)
-
-<details>
-<summary><b>All screens</b> (click to expand)</summary>
-
-| | |
-|---|---|
-| <a href="screenshots/annotated/01-status.png"><img src="screenshots/annotated/01-status.png" alt="01-status"></a> | <a href="screenshots/annotated/02-chat-team.png"><img src="screenshots/annotated/02-chat-team.png" alt="02-chat-team"></a> |
-| **Team status** (lead): who is online, what each person is working on, and live git activity | **Chat**: the team channel, direct messages and every Claude-to-Claude conversation |
-| <a href="screenshots/annotated/03-claude-to-claude.png"><img src="screenshots/annotated/03-claude-to-claude.png" alt="03-claude-to-claude"></a> | <a href="screenshots/annotated/04-fix-request.png"><img src="screenshots/annotated/04-fix-request.png" alt="04-fix-request"></a> |
-| **Claude to Claude**: one teammate's Claude asks, another's reads their code and answers | **Fix requests**: approved by the owner, done on a separate branch |
-| <a href="screenshots/annotated/05-my-claude.png"><img src="screenshots/annotated/05-my-claude.png" alt="05-my-claude"></a> | <a href="screenshots/annotated/06-tasks.png"><img src="screenshots/annotated/06-tasks.png" alt="06-tasks"></a> |
-| **My Claude**: chat with your own Claude Code (read-only), which can reach the team | **Tasks**: questions, fixes and assignments, with the full diff of every fix |
-| <a href="screenshots/annotated/07-members.png"><img src="screenshots/annotated/07-members.png" alt="07-members"></a> | <a href="screenshots/annotated/08-audit.png"><img src="screenshots/annotated/08-audit.png" alt="08-audit"></a> |
-| **Members** (lead): approve new computers and see every device | **Audit log** (lead): every join, question, approval and fix |
-| <a href="screenshots/annotated/09-approval.png"><img src="screenshots/annotated/09-approval.png" alt="09-approval"></a> | <a href="screenshots/annotated/10-settings.png"><img src="screenshots/annotated/10-settings.png" alt="10-settings"></a> |
-| **Approval**: nothing changes on your computer until you approve | **Settings**: safe defaults; editor integration is optional |
-| <a href="screenshots/annotated/11-welcome.png"><img src="screenshots/annotated/11-welcome.png" alt="11-welcome"></a> |  |
-| **First launch**: create a team or join one on the office Wi-Fi |  |
-
-</details>
-
-The numbered notes are added for this README. The same screens without notes are in [`screenshots/`](screenshots/), and the annotated versions are in [`screenshots/annotated/`](screenshots/annotated/). All names, devices, IP addresses and projects shown are made-up demo data.
-
 ## How it works
 
 ![How Claude Link works](docs/how-it-works.png)
