@@ -106,13 +106,55 @@ Alternatively, the lead can add you under **Members → Add member** and send yo
   - start the app when you log in;
   - optionally add the team tools to your regular Claude Code in VS Code or the terminal (off by default).
 
-### Building the installers
+### Building the installers (.dmg and .exe)
+
+You need **Node.js 24 or newer** and **git**. Run every command from the repository folder.
+
+**1. Get the code and install dependencies (once)**
 ```bash
+git clone https://github.com/Faydevlop/claude-link.git
+cd claude-link
 npm install
-npm run app          # run the app in development
-npm run dist:mac     # build a .dmg on a Mac (Windows installers are built by CI)
+npm test             # optional: check everything works
 ```
-Pushing a tag like `v0.2.0` runs `.github/workflows/desktop.yml`. It builds the Mac and Windows installers and attaches them to a GitHub Release.
+
+**2. Build**
+
+| You want | Run | Works on |
+|---|---|---|
+| Mac installer (`.dmg`) | `npm run dist:mac` | a Mac |
+| Windows installer (`.exe`) | `npm run dist:win` | a Mac or a Windows PC |
+
+The installers are written to `packages/desktop/release/`:
+
+| File | For |
+|---|---|
+| `Claude-Link-<version>-mac-arm64.dmg` | Macs with an Apple chip (M1 and later) |
+| `Claude-Link-<version>-mac-x64.dmg` | Older Intel Macs |
+| `Claude-Link-Setup-<version>.exe` | Windows 10 and 11 (64-bit) |
+
+To check which chip a Mac has, open Apple menu → **About This Mac**. The first build downloads Electron and the installer tools, which needs internet. Later builds reuse them.
+
+**3. Share them.** Send the files any way you like: a shared drive, a USB stick or chat. Teammates install them as described under [Install](#install).
+
+**Releasing a new version**
+1. Change `"version"` in `packages/desktop/package.json`, for example `0.2.0` → `0.3.0`. The version shows in **Settings** and in the file names.
+2. Build again as above, or let GitHub build both installers.
+
+**Building on GitHub instead**
+
+`.github/workflows/desktop.yml` builds the Mac and Windows installers on GitHub's own machines. There are two ways to start it:
+- **Without a release:** on GitHub, open **Actions → Desktop app → Run workflow**. When it finishes, download the installers from the run's **Artifacts** section.
+- **With a release:** push a version tag, for example `git tag v0.3.0 && git push origin v0.3.0`. This builds both installers and attaches them to a GitHub Release.
+
+**For development**
+```bash
+npm run app          # run the app from source, without building an installer
+```
+
+**Troubleshooting**
+- Before installing a new build over an old one, quit Claude Link: tray or menu bar icon → **Quit**. Closing the window only hides it. Your team, settings and chat history are kept.
+- The installers are not signed with a paid certificate. That is why macOS asks you to right-click → **Open** the first time, and why Windows shows **More info → Run anyway**.
 
 ---
 
