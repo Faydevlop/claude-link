@@ -17,7 +17,6 @@ export default function MyClaude({ projects }: { projects: Project[] }) {
   const [sessions, setSessions] = useState<MyClaudeSession[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [text, setText] = useState('');
-  const [mode, setMode] = useState<'ask' | 'edit'>('ask');
   const [error, setError] = useState('');
   const bottom = useRef<HTMLDivElement>(null);
   const active = sessions.find(s => s.id === activeId) ?? null;
@@ -34,13 +33,12 @@ export default function MyClaude({ projects }: { projects: Project[] }) {
   }, [bridge]);
 
   useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); }, [active?.messages.length, active?.messages.at(-1)?.text.length, active?.messages.at(-1)?.tools.length]);
-  useEffect(() => { if (active) setMode(active.mode); }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const send = async (msg = text) => {
     if (!msg.trim()) return;
     setError('');
     try {
-      const s = await bridge.myClaude.send({ sessionId: activeId, text: msg.trim(), mode });
+      const s = await bridge.myClaude.send({ sessionId: activeId, text: msg.trim() });
       setSessions(list => [s, ...list.filter(x => x.id !== s.id)]);
       setActiveId(s.id);
       setText('');
@@ -73,14 +71,7 @@ export default function MyClaude({ projects }: { projects: Project[] }) {
                 : projects.length === 1 ? `Working in ${projects[0]!.name}` : `Working across ${projects.length} projects: ${projects.map(p => p.name).join(', ')}`}
             </div>
           </div>
-          <div className="ml-auto flex rounded-lg bg-stone-200/70 p-0.5 text-sm dark:bg-stone-800">
-            {(['ask', 'edit'] as const).map(m => (
-              <button key={m} onClick={() => setMode(m)} title={m === 'ask' ? 'Read-only: Claude can look but not change anything' : 'Claude can edit files and run commands in your project'}
-                className={cx('rounded-md px-3 py-1', mode === m && 'bg-white shadow-sm dark:bg-stone-950')}>
-                {m === 'ask' ? 'Ask (read-only)' : 'Edit'}
-              </button>
-            ))}
-          </div>
+          <span className="ml-auto rounded-lg bg-stone-200/70 px-3 py-1 text-sm text-stone-600 dark:bg-stone-800 dark:text-stone-300" title="Claude can look at your code but never change it">Read-only</span>
         </header>
 
         <div className="flex-1 overflow-y-auto px-4">
@@ -125,7 +116,6 @@ export default function MyClaude({ projects }: { projects: Project[] }) {
 
         <div className="border-t border-stone-200 p-3 dark:border-stone-800">
           {error && <div className="mb-2 text-sm text-red-600">{error}</div>}
-          {mode === 'edit' && <div className="mb-2 text-xs text-amber-600">Edit mode: Claude can change files and run commands in your project.</div>}
           <div className="mx-auto flex max-w-3xl gap-2">
             <textarea className={cx(inputCls, 'min-h-[42px] resize-none')} rows={Math.min(6, text.split('\n').length)} value={text}
               placeholder={active?.running ? 'Claude is working…' : 'Message your Claude…'}

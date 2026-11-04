@@ -255,7 +255,7 @@ function registerIpc() {
   handle('app:openExternal', (url: string) => { if (/^https?:\/\//.test(url)) void shell.openExternal(url); });
 
   handle('myClaude:list', () => listSessions());
-  handle('myClaude:send', (input: { sessionId: string | null; text: string; mode: 'ask' | 'edit' }) =>
+  handle('myClaude:send', (input: { sessionId: string | null; text: string }) =>
     sendMessage(input, session => send({ type: 'myClaude', session })));
   handle('myClaude:stop', (id: string) => stopSession(id));
   handle('myClaude:remove', (id: string) => removeSession(id));

@@ -58,8 +58,7 @@ Alternatively, the lead can add you under **Members → Add member** and send yo
 ### Using it
 - **Chat:** `#team`, direct messages, and every Claude-to-Claude conversation. Click **Ask a teammate's Claude** to send a question or a fix request.
 - **My Claude:** chat with your own Claude Code. It works on your project and can also message teammates' Claudes, for example "ask the backend Claude what `/orders` returns" or "report status: login page done".
-  - **Ask** mode is read-only.
-  - **Edit** mode can change files and run commands.
+  It is read-only: it can read your code but never changes files.
 - **Approvals:** when someone's Claude wants to change your code, you get a notification and a yellow **Approve / Reject** banner.
 - **Several projects:**
   - Questions can read all of them.

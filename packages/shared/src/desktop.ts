@@ -56,7 +56,6 @@ export interface MyClaudeMessage {
 export interface MyClaudeSession {
   id: string;
   title: string;
-  mode: 'ask' | 'edit';
   claudeSessionId: string | null;
   messages: MyClaudeMessage[];
   running: boolean;
@@ -89,7 +88,7 @@ export interface DesktopBridge {
 
   myClaude: {
     list(): Promise<MyClaudeSession[]>;
-    send(input: { sessionId: string | null; text: string; mode: 'ask' | 'edit' }): Promise<MyClaudeSession>;
+    send(input: { sessionId: string | null; text: string }): Promise<MyClaudeSession>;
     stop(sessionId: string): Promise<void>;
     remove(sessionId: string): Promise<void>;
   };
