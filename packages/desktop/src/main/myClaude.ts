@@ -8,6 +8,7 @@ import { resolveClaudeBin, spawnClaude } from '../../../cli/src/agent/claudeBin.
 import type { MyClaudeMessage, MyClaudeSession } from '../../../shared/src/desktop.ts';
 import { dataDir, loadSettings } from './settings.ts';
 import { describeProjects, workspaceFor } from '../../../cli/src/projects.ts';
+import { PROTECTED_RULES, protectedEnv } from '../../../cli/src/agent/protect.ts';
 
 const READ_TOOLS = ['Read', 'Grep', 'Glob', 'WebSearch', 'WebFetch', 'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git diff:*)', 'Bash(git show:*)', 'Bash(ls:*)'];
 const TEAM_TOOLS = 'mcp__claude-link';
@@ -88,6 +89,7 @@ export function sendMessage(input: { sessionId: string | null; text: string }, e
     // My Claude is read-only: it can look at code and talk to the team, never change files.
     '--permission-mode', 'default',
     '--allowedTools', [...READ_TOOLS, TEAM_TOOLS].join(','),
+    '--disallowedTools', PROTECTED_RULES.join(','),
     '--mcp-config', mcpConfigFile(),
     '--append-system-prompt',
     `You are ${settings.name}'s Claude Code, running inside the Claude Link desktop app for the team "${settings.teamName}". ` +
@@ -100,7 +102,7 @@ export function sendMessage(input: { sessionId: string | null; text: string }, e
   for (const d of ws?.addDirs ?? []) args.push('--add-dir', d);
 
   const cwd = ws?.cwd ?? homedir();
-  const child = spawnClaude(resolveClaudeBin(settings.claudeBin), args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], env: process.env });
+  const child = spawnClaude(resolveClaudeBin(settings.claudeBin), args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], env: protectedEnv() });
   running.set(s.id, child);
 
   let buf = '';

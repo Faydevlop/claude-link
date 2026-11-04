@@ -21,7 +21,7 @@ const repo = (path: string, files: Record<string, string> = { 'app.txt': 'hello\
 
 // Stands in for Claude Code: echoes where it ran, and in fix mode edits backend/app.txt only.
 const FAKE_CLAUDE = `#!/usr/bin/env node
-const fs = require('fs'), path = require('path');
+const fs = require('fs'), path = require('path'), { execSync } = require('child_process');
 let prompt = ''; process.stdin.on('data', d => prompt += d).on('end', () => {
   const argv = process.argv.slice(2);
   const addDirs = argv.flatMap((a, i) => a === '--add-dir' ? [argv[i + 1]] : []);
@@ -33,7 +33,9 @@ let prompt = ''; process.stdin.on('data', d => prompt += d).on('end', () => {
   const out = o => console.log(JSON.stringify(o));
   out({ type: 'system', subtype: 'init', session_id: 's1' });
   out({ type: 'result', subtype: 'success', is_error: false, session_id: 's1',
-    result: JSON.stringify({ cwd: process.cwd(), entries: fs.readdirSync('.').sort(), addDirs }) });
+    result: JSON.stringify({ cwd: process.cwd(), entries: fs.readdirSync('.').sort(), addDirs,
+      disallowed: argv[argv.indexOf('--disallowedTools') + 1],
+      backendLog: fs.existsSync('backend') ? execSync('git -C backend log -p', { encoding: 'utf8' }) : '' }) });
 });
 `;
 
@@ -98,6 +100,19 @@ describe('running tasks across several projects', () => {
     expect(res.ok).toBe(true);
     expect(JSON.parse(res.result).cwd).toContain(join('ws'));
     expect(JSON.parse(res.result).entries).toEqual(['backend', 'frontend']);
+  });
+
+  it('keeps env files out of reach', async () => {
+    const c = config();
+    const backend = join(dir, 'ws', 'backend');
+    writeFileSync(join(backend, '.env'), 'DB_PASSWORD=hunter2\n');
+    execFileSync('git', ['add', '.env'], { cwd: backend });
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'env'], { cwd: backend });
+    const out = JSON.parse((await runTask(task('read'), requester, null, c, () => {})).result);
+    expect(out.disallowed.split(',')).toEqual(expect.arrayContaining(['Read(**/.env)', 'Read(**/.env.*)', 'Edit(**/.env)', 'Bash(git show *.env*)']));
+    // Git history shows that the file changed, never what is in it.
+    expect(out.backendLog).toContain('Binary files /dev/null and b/.env differ');
+    expect(out.backendLog).not.toContain('hunter2');
   });
 
   it('gives a fix a worktree of every project and keeps the branch only where files changed', async () => {

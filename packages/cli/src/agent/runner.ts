@@ -5,6 +5,7 @@ import type { Config } from '../config.ts';
 import { home } from '../config.ts';
 import { git } from './git.ts';
 import { resolveClaudeBin, spawnClaude } from './claudeBin.ts';
+import { PROTECTED_RULES, protectedEnv } from './protect.ts';
 import { describeProjects, workspaceFor } from '../projects.ts';
 
 export interface RunResult {
@@ -44,7 +45,7 @@ function runClaude(opts: {
   for (const d of opts.addDirs ?? []) args.push('--add-dir', d);
 
   return new Promise(resolve => {
-    const child = spawnClaude(opts.bin, args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: process.env });
+    const child = spawnClaude(opts.bin, args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: protectedEnv() });
     let buf = '';
     let stderr = '';
     let sessionId: string | undefined;
@@ -106,7 +107,7 @@ export async function runTask(task: Task, requester: Requester, resumeSessionId:
   if (task.mode === 'read') {
     return runClaude({
       bin, cwd: ws.cwd, addDirs: ws.addDirs, prompt: task.prompt, resume: resumeSessionId, timeoutMs, onProgress,
-      permissionMode: 'default', allowedTools: READ_TOOLS, disallowedTools: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'],
+      permissionMode: 'default', allowedTools: READ_TOOLS, disallowedTools: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...PROTECTED_RULES],
       systemPrompt:
         `You are ${config.name}'s Claude Code, answering a request from ${who} sent through Claude Link, a team context-sharing tool. ` +
         projectNote +
@@ -145,7 +146,7 @@ export async function runTask(task: Task, requester: Requester, resumeSessionId:
   try {
     const run = await runClaude({
       bin, cwd: trees.length === 1 ? trees[0]!.wt : root, prompt: task.prompt, resume: null, timeoutMs, onProgress,
-      permissionMode: 'acceptEdits', allowedTools: [...FIX_TOOLS, ...(config.fixAllowedTools ?? [])], disallowedTools: [],
+      permissionMode: 'acceptEdits', allowedTools: [...FIX_TOOLS, ...(config.fixAllowedTools ?? [])], disallowedTools: PROTECTED_RULES,
       systemPrompt:
         `You are ${config.name}'s Claude Code, handling a change request from ${who} sent through Claude Link. ` +
         `${config.name} approved it. ` +
